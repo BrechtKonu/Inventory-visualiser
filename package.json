@@ -1,0 +1,16 @@
+{
+  "name": "odoo-inventory-flow-standalone",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-standalone.mjs",
+    "proxy": "node scripts/proxy-server.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.2"
+  }
+}
