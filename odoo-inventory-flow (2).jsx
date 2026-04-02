@@ -102,7 +102,6 @@ const fieldDefs = {
       { value: "production", label: "Production" }, { value: "transit", label: "Transit" },
     ]},
     { key: "scrap_location", label: "Scrap Location", type: "boolean" },
-    { key: "return_location", label: "Return Location", type: "boolean" },
     { key: "replenish_location", label: "Replenish Location", type: "boolean" },
     { key: "removal_strategy", label: "Removal Strategy", type: "select", options: [
       { value: "fifo", label: "FIFO" }, { value: "lifo", label: "LIFO" },
@@ -136,7 +135,6 @@ const fieldDefs = {
     { key: "product_categ_selectable", label: "Applicable on Category", type: "boolean" },
     { key: "warehouse_selectable", label: "Applicable on Warehouse", type: "boolean" },
     { key: "sale_selectable", label: "Applicable on SO", type: "boolean" },
-    { key: "purchase_selectable", label: "Applicable on PO", type: "boolean" },
   ],
   rule: [
     { key: "name", label: "Description", type: "text" },
@@ -249,7 +247,7 @@ function bPath(p1, p2, s1, s2, curveOffset = 0) {
 }
 
 // ─── SAMPLE DATA ────────────────────────────────────────────────────────────
-const L = (id, label, x, y, usage, extra = {}) => ({ id, type: "location", label, x, y, data: { complete_name: label, usage, scrap_location: false, return_location: false, replenish_location: false, removal_strategy: "fifo", barcode: "", ...extra }});
+const L = (id, label, x, y, usage, extra = {}) => ({ id, type: "location", label, x, y, data: { complete_name: label, usage, scrap_location: false, replenish_location: false, removal_strategy: "fifo", barcode: "", ...extra }});
 const initData = () => ({
   nodes: [
     { id: "wh1", type: "warehouse", label: "Main Warehouse", x: 40, y: 10, data: { code: "WH", name: "Main Warehouse", reception_steps: "three_steps", delivery_steps: "pick_pack_ship", buy_to_resupply: true, manufacture_to_resupply: true }},
@@ -290,7 +288,7 @@ const initData = () => ({
   routes: [
     // ── Receive in 3 steps (Input → QC → Stock)
     { id: "route-recv3", label: "Receive 3 steps (Input→QC→Stock)", colorIdx: 0,
-      data: { name: "WH: Receive in 3 steps", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, purchase_selectable: false },
+      data: { name: "WH: Receive in 3 steps", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, },
       rules: [
         { id: "rl-r3a", label: "Vendors → Input", action: "pull", procure_method: "make_to_order", src_location_id: "loc-vendors", dest_location_id: "loc-input", picking_type_id: "op-receipt", auto: "manual", data: { name: "Vendors → Input", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 }},
         { id: "rl-r3b", label: "Input → QC", action: "pull", procure_method: "make_to_order", src_location_id: "loc-input", dest_location_id: "loc-qc", picking_type_id: "op-qc", auto: "manual", data: { name: "Input → QC", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 }},
@@ -298,7 +296,7 @@ const initData = () => ({
       ]},
     // ── Pick-Pack-Ship (web orders)
     { id: "route-pps", label: "Pick → Pack → Ship (Web)", colorIdx: 1,
-      data: { name: "WH: Pick Pack Ship", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: true, purchase_selectable: false },
+      data: { name: "WH: Pick Pack Ship", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: true, },
       rules: [
         { id: "rl-pps1", label: "Stock → Packing", action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock", dest_location_id: "loc-packing", picking_type_id: "op-pick", auto: "manual", data: { name: "Stock → Packing", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
         { id: "rl-pps2", label: "Packing → Output", action: "pull", procure_method: "make_to_order", src_location_id: "loc-packing", dest_location_id: "loc-output", picking_type_id: "op-pack", auto: "manual", data: { name: "Packing → Output", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
@@ -306,7 +304,7 @@ const initData = () => ({
       ]},
     // ── Production (with picking step)
     { id: "route-prod", label: "Manufacture (with picking)", colorIdx: 2,
-      data: { name: "WH: Manufacture", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: false, sale_selectable: false, purchase_selectable: false },
+      data: { name: "WH: Manufacture", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: false, sale_selectable: false, },
       rules: [
         { id: "rl-mo1", label: "Stock → Pre-Prod", action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock", dest_location_id: "loc-preprod", picking_type_id: "op-mo-pick", auto: "manual", data: { name: "Stock → Pre-Production", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 }},
         { id: "rl-mo2", label: "Pre-Prod → Production", action: "manufacture", procure_method: "make_to_order", src_location_id: "loc-preprod", dest_location_id: "loc-production", picking_type_id: "op-mo-prod", auto: "manual", data: { name: "Manufacturing Order", action: "manufacture", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 1 }},
@@ -314,14 +312,14 @@ const initData = () => ({
       ]},
     // ── Crossdock
     { id: "route-xdock", label: "CrossDock", colorIdx: 3,
-      data: { name: "WH: CrossDock", active: true, product_selectable: true, product_categ_selectable: false, warehouse_selectable: false, sale_selectable: true, purchase_selectable: false },
+      data: { name: "WH: CrossDock", active: true, product_selectable: true, product_categ_selectable: false, warehouse_selectable: false, sale_selectable: true, },
       rules: [
         { id: "rl-xd1", label: "Input → CrossDock", action: "pull", procure_method: "make_to_order", src_location_id: "loc-input", dest_location_id: "loc-crossdock", picking_type_id: "op-crossdock", auto: "transparent", data: { name: "Input → CrossDock", action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 0 }},
         { id: "rl-xd2", label: "CrossDock → Customers", action: "pull", procure_method: "make_to_order", src_location_id: "loc-crossdock", dest_location_id: "loc-customers", picking_type_id: "op-xd-out", auto: "manual", data: { name: "CrossDock → Customers", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
       ]},
     // ── Buy (simple replenishment)
     { id: "route-buy", label: "Buy", colorIdx: 4,
-      data: { name: "WH: Buy", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, purchase_selectable: false },
+      data: { name: "WH: Buy", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, },
       rules: [
         { id: "rl-buy1", label: "Buy → Input", action: "buy", procure_method: "make_to_order", src_location_id: "loc-vendors", dest_location_id: "loc-input", picking_type_id: "op-receipt", auto: "manual", data: { name: "Buy", action: "buy", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 3 }},
       ]},
@@ -443,11 +441,18 @@ const PutawayPanel = ({ locationId, locationLabel, rules, onUpdate, onAdd, onDel
 };
 
 // ─── PROPERTY PANEL ─────────────────────────────────────────────────────────
-const PropPanel = ({ sel, data, onUpdate, onClose, onDelete }) => {
+const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOdooSession }) => {
+  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | { ok } | { error }
   if (!sel) return null;
   const { type, id, item } = sel;
   const fields = fieldDefs[type] || [];
   const s = nodeStyles[type] || nodeStyles.location;
+  const handleSave = async () => {
+    setSaveStatus("saving");
+    const res = await onSaveToOdoo(type, id, item);
+    if (res.error) { setSaveStatus({ error: res.error }); setTimeout(() => setSaveStatus(null), 4000); }
+    else { setSaveStatus({ ok: true }); setTimeout(() => setSaveStatus(null), 2000); }
+  };
 
   return (
     <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 330, background: T.surface, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 30, fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -460,6 +465,11 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete }) => {
           </div>
         </div>
         <div style={{ display: "flex", gap: 3 }}>
+          {hasOdooSession && (
+            <Btn variant={saveStatus?.ok ? "default" : "primary"} small icon="upload" onClick={handleSave} disabled={saveStatus === "saving"}>
+              {saveStatus === "saving" ? "…" : saveStatus?.ok ? "✓" : saveStatus?.error ? "✕" : "Save"}
+            </Btn>
+          )}
           <Btn variant="danger" small icon="delete" onClick={() => onDelete(type, id)} />
           <Btn variant="ghost" small icon="close" onClick={onClose} />
         </div>
@@ -467,16 +477,16 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete }) => {
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
         {type !== "rule" && item?.label !== undefined && (
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Label</label>
+            <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Label</label>
             <input type="text" value={item.label} onChange={e => onUpdate(type, id, { label: e.target.value })} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
           </div>
         )}
         {type === "operation_type" && (
           <>
-            <div style={{ fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}` }}>Location Mapping</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}` }}>Location Mapping</div>
             {["src_location_id", "dest_location_id"].map(k => (
               <div key={k} style={{ marginBottom: 10 }}>
-                <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{k === "src_location_id" ? "Source Location" : "Dest Location"}</label>
+                <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{k === "src_location_id" ? "Source Location" : "Dest Location"}</label>
                 <select value={item[k] || ""} onChange={e => onUpdate(type, id, { [k]: e.target.value })} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
                   {data.nodes.filter(n => n.type === "location").map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
                 </select>
@@ -486,31 +496,31 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete }) => {
         )}
         {type === "rule" && (
           <>
-            <div style={{ fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}` }}>Connections</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}` }}>Connections</div>
             <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Label</label>
+              <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Label</label>
               <input type="text" value={item.label} onChange={e => onUpdate(type, id, { label: e.target.value })} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
             </div>
             {["src_location_id", "dest_location_id"].map(k => (
               <div key={k} style={{ marginBottom: 10 }}>
-                <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{k.includes("src") ? "Source" : "Destination"}</label>
+                <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{k.includes("src") ? "Source" : "Destination"}</label>
                 <select value={item[k]} onChange={e => onUpdate(type, id, { [k]: e.target.value })} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
                   {data.nodes.filter(n => n.type === "location").map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
                 </select>
               </div>
             ))}
             <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Operation Type</label>
+              <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Operation Type</label>
               <select value={item.picking_type_id} onChange={e => onUpdate(type, id, { picking_type_id: e.target.value })} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
                 {data.operationTypes.map(op => <option key={op.id} value={op.id}>{op.label}</option>)}
               </select>
             </div>
           </>
         )}
-        <div style={{ fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}`, marginTop: 4 }}>Odoo Fields</div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6, paddingBottom: 4, borderBottom: `1px solid ${T.border}`, marginTop: 4 }}>Odoo Fields</div>
         {fields.map(f => (
           <div key={f.key} style={{ marginBottom: 10 }}>
-            <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 3 }}>{f.label}</label>
+            <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 3 }}>{f.label}</label>
             {f.type === "boolean" ? (
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!item.data?.[f.key]} onChange={e => onUpdate(type, id, { data: { ...item.data, [f.key]: e.target.checked } })} style={{ accentColor: T.accent, width: 13, height: 13 }} />
@@ -534,7 +544,7 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete }) => {
 const ApiPanel = ({ data, apiConfig, onClose }) => {
   const [tab, setTab] = useState("fetch");
   const u = apiConfig.url || "https://your-odoo.com", db = apiConfig.db || "your_db", l = apiConfig.username || "admin";
-  const fetchCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"  # Settings → Users → API Keys\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef sr(model, domain=[], fields=[], limit=100):\n    return models.execute_kw(db, uid, api_key, model, 'search_read', [domain], {'fields': fields, 'limit': limit})\n\nwarehouses = sr('stock.warehouse', [], ['name','code','reception_steps','delivery_steps'])\nlocations = sr('stock.location', [('usage','!=','view')], ['complete_name','usage','removal_strategy','barcode'])\npicking_types = sr('stock.picking.type', [], ['name','code','sequence_code','default_location_src_id','default_location_dest_id','create_backorder','reservation_method'])\nroutes = sr('stock.route', [], ['name','active','rule_ids','product_selectable','warehouse_selectable','sale_selectable','purchase_selectable'])\n\nfor route in routes:\n    if route.get('rule_ids'):\n        rules = sr('stock.rule', [('id','in',route['rule_ids'])], ['name','action','procure_method','location_src_id','location_dest_id','picking_type_id','auto','delay'])\n        for r in rules:\n            src = r.get('location_src_id',[0,''])[1] if isinstance(r.get('location_src_id'),(list,tuple)) else ''\n            dst = r.get('location_dest_id',[0,''])[1] if isinstance(r.get('location_dest_id'),(list,tuple)) else ''\n            print(f"  [{r['action']}] {src} → {dst}")\n\nputaway = sr('stock.putaway.rule', [], ['product_id','category_id','location_in_id','location_out_id','sequence'])\nprint(f"\\nTotal: {len(warehouses)} WH, {len(locations)} loc, {len(picking_types)} ops, {len(routes)} routes, {len(putaway)} putaway")`;
+  const fetchCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"  # Settings → Users → API Keys\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef sr(model, domain=[], fields=[], limit=100):\n    return models.execute_kw(db, uid, api_key, model, 'search_read', [domain], {'fields': fields, 'limit': limit})\n\nwarehouses = sr('stock.warehouse', [], ['name','code','reception_steps','delivery_steps'])\nlocations = sr('stock.location', [('usage','!=','view')], ['complete_name','usage','removal_strategy','barcode'])\npicking_types = sr('stock.picking.type', [], ['name','code','sequence_code','default_location_src_id','default_location_dest_id','create_backorder','reservation_method'])\nroutes = sr('stock.route', [], ['name','active','rule_ids','product_selectable','warehouse_selectable','sale_selectable'])\n\nfor route in routes:\n    if route.get('rule_ids'):\n        rules = sr('stock.rule', [('id','in',route['rule_ids'])], ['name','action','procure_method','location_src_id','location_dest_id','picking_type_id','auto','delay'])\n        for r in rules:\n            src = r.get('location_src_id',[0,''])[1] if isinstance(r.get('location_src_id'),(list,tuple)) else ''\n            dst = r.get('location_dest_id',[0,''])[1] if isinstance(r.get('location_dest_id'),(list,tuple)) else ''\n            print(f"  [{r['action']}] {src} → {dst}")\n\nputaway = sr('stock.putaway.rule', [], ['product_id','category_id','location_in_id','location_out_id','sequence'])\nprint(f"\\nTotal: {len(warehouses)} WH, {len(locations)} loc, {len(picking_types)} ops, {len(routes)} routes, {len(putaway)} putaway")`;
   const writeCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef write(model, rid, vals):\n    return models.execute_kw(db, uid, api_key, model, 'write', [[rid], vals])\n\ndef create(model, vals):\n    return models.execute_kw(db, uid, api_key, model, 'create', [vals])\n\n# ── Operation Types ──\n${data.operationTypes.map(op => `# ${op.label}: write('stock.picking.type', ID, ${JSON.stringify(op.data)})`).join("\n")}\n\n# ── Routes & Rules ──\n${data.routes.map(r => `# Route: ${r.label}\n# route_id = create('stock.route', ${JSON.stringify(r.data)})\n${r.rules.map(rl => `# create('stock.rule', {**${JSON.stringify(rl.data)}, 'route_id': route_id})`).join("\n")}`).join("\n\n")}`;
   const code = tab === "fetch" ? fetchCode : writeCode;
 
@@ -562,7 +572,20 @@ const ApiPanel = ({ data, apiConfig, onClose }) => {
 };
 
 // ─── CONFIG MODAL ───────────────────────────────────────────────────────────
-const CfgModal = ({ cfg, onChange, onClose }) => (
+const CfgModal = ({ cfg, onChange, onClose }) => {
+  const [testStatus, setTestStatus] = useState(null); // null | "testing" | { ok: string } | { error: string }
+  const handleTest = async () => {
+    if (!cfg.url || !cfg.db || !cfg.username || !cfg.apiKey) { setTestStatus({ error: "Fill in all fields first" }); return; }
+    setTestStatus("testing");
+    try {
+      const session = await odooRpc(cfg, "/web/session/authenticate", { db: cfg.db, login: cfg.username, password: cfg.apiKey });
+      if (!session?.uid) throw new Error("Authentication failed");
+      setTestStatus({ ok: `Connected as uid ${session.uid}` });
+    } catch (err) {
+      setTestStatus({ error: err.message || "Connection failed" });
+    }
+  };
+  return (
   <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onClose}>
     <div style={{ width: 400, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }} onClick={e => e.stopPropagation()}>
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -572,15 +595,24 @@ const CfgModal = ({ cfg, onChange, onClose }) => (
       <div style={{ padding: "14px 18px" }}>
         {[{ k: "url", l: "Server URL", p: "https://mycompany.odoo.com" }, { k: "db", l: "Database", p: "mycompany-main" }, { k: "username", l: "Login", p: "admin@company.com" }, { k: "apiKey", l: "API Key", p: "Settings → Users → API Keys", t: "password" }].map(f => (
           <div key={f.k} style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", fontSize: 9, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{f.l}</label>
+            <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: T.textSoft, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>{f.l}</label>
             <input type={f.t || "text"} value={cfg[f.k] || ""} placeholder={f.p} onChange={e => onChange({ ...cfg, [f.k]: e.target.value })} style={{ width: "100%", padding: "7px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
           </div>
         ))}
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 6 }}><Btn onClick={onClose}>Cancel</Btn><Btn variant="primary" icon="api">Test</Btn></div>
+        {testStatus && testStatus !== "testing" && (
+          <div style={{ padding: "6px 10px", marginBottom: 8, borderRadius: 5, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", background: testStatus.ok ? T.greenSoft : T.roseSoft, color: testStatus.ok ? T.green : T.rose }}>
+            {testStatus.ok || testStatus.error}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 6 }}>
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" icon="api" onClick={handleTest} disabled={testStatus === "testing"}>{testStatus === "testing" ? "Testing…" : "Test"}</Btn>
+        </div>
       </div>
     </div>
   </div>
-);
+  );
+};
 
 // ─── ADD MODAL ──────────────────────────────────────────────────────────────
 const AddModal = ({ onAdd, routes, onAddRule, onClose }) => {
@@ -661,6 +693,337 @@ const AddModal = ({ onAdd, routes, onAddRule, onClose }) => {
   );
 };
 
+// ─── PUSH CONFIRMATION MODAL ────────────────────────────────────────────────
+const PushModal = ({ changes, onConfirm, onCancel }) => {
+  const grouped = { creates: {}, updates: {}, deletes: {} };
+  for (const c of changes.creates) { grouped.creates[c.type] = (grouped.creates[c.type] || 0) + 1; }
+  for (const c of changes.updates) { grouped.updates[c.type] = (grouped.updates[c.type] || 0) + 1; }
+  for (const c of changes.deletes) { grouped.deletes[c.type] = (grouped.deletes[c.type] || 0) + 1; }
+  const Section = ({ label, items, color }) => {
+    const entries = Object.entries(items);
+    if (entries.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+        {entries.map(([type, count]) => (
+          <div key={type} style={{ fontSize: 11, color: T.text, padding: "2px 0", fontFamily: "'IBM Plex Mono', monospace" }}>
+            {count}× {type.replace(/_/g, " ")}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onCancel}>
+      <div style={{ width: 380, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Push to Odoo</span>
+          <Btn variant="ghost" small icon="close" onClick={onCancel} />
+        </div>
+        <div style={{ padding: "14px 18px" }}>
+          <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 12 }}>{changes.total} change{changes.total !== 1 ? "s" : ""} to push:</div>
+          <Section label="Create" items={grouped.creates} color={T.green} />
+          <Section label="Update" items={grouped.updates} color={T.amber} />
+          <Section label="Deactivate" items={grouped.deletes} color={T.rose} />
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 12 }}>
+            <Btn onClick={onCancel}>Cancel</Btn>
+            <Btn variant="primary" icon="upload" onClick={() => onConfirm(changes)}>Push {changes.total} changes</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ODOO LIVE FETCH & WRITE
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Low-level proxy call. Sends { targetUrl, path, params } to /odoo-proxy and
+// returns result, or throws with a human-readable message.
+async function odooRpc(cfg, path, params) {
+  if (window.location.protocol === "file:") {
+    throw new Error("Live Odoo calls require the proxy server.\nRun: npm run proxy  then open http://localhost:4173");
+  }
+  const res = await fetch("/odoo-proxy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUrl: cfg.url, path, params }),
+  });
+  const json = await res.json();
+  if (json?.error) {
+    const msg = json.error?.data?.message || json.error?.message || JSON.stringify(json.error);
+    throw new Error(msg);
+  }
+  return json.result;
+}
+
+// Extract Odoo numeric ID from app ID (e.g. "loc-42" → 42, "route-1743600000000" → null for local items)
+function odooId(appId) {
+  const m = appId?.match(/-(\d+)$/);
+  if (!m) return null;
+  const n = parseInt(m[1]);
+  return n < 1e10 ? n : null; // timestamp IDs (>10 digits) are local
+}
+
+// Model name for each app entity type
+const ODOO_MODEL = {
+  warehouse: "stock.warehouse", location: "stock.location",
+  operation_type: "stock.picking.type", route: "stock.route",
+  rule: "stock.rule", putaway_rule: "stock.putaway.rule",
+};
+
+// Write a single record to Odoo
+async function odooWrite(cfg, ctx, model, id, vals) {
+  return odooRpc(cfg, "/web/dataset/call_kw", {
+    model, method: "write", args: [[id], vals], kwargs: { context: ctx },
+  });
+}
+
+// Create a single record in Odoo, returns new ID
+async function odooCreate(cfg, ctx, model, vals) {
+  return odooRpc(cfg, "/web/dataset/call_kw", {
+    model, method: "create", args: [vals], kwargs: { context: ctx },
+  });
+}
+
+// Deactivate a record (soft delete)
+async function odooDeactivate(cfg, ctx, model, id) {
+  return odooRpc(cfg, "/web/dataset/call_kw", {
+    model, method: "write", args: [[id], { active: false }], kwargs: { context: ctx },
+  });
+}
+
+// Deep-compare two plain objects, return object with only changed keys (or null if equal)
+function diffData(current, previous) {
+  if (!current || !previous) return current || null;
+  const changes = {};
+  let hasChanges = false;
+  for (const key of Object.keys(current)) {
+    if (JSON.stringify(current[key]) !== JSON.stringify(previous[key])) {
+      changes[key] = current[key];
+      hasChanges = true;
+    }
+  }
+  return hasChanges ? changes : null;
+}
+
+// Build app→Odoo field values for writing. Converts app IDs to Odoo IDs.
+function toOdooVals(type, item) {
+  const vals = { ...item.data };
+  if (type === "operation_type") {
+    if (item.src_location_id) vals.default_location_src_id = odooId(item.src_location_id);
+    if (item.dest_location_id) vals.default_location_dest_id = odooId(item.dest_location_id);
+  }
+  if (type === "rule") {
+    if (item.src_location_id) vals.location_src_id = odooId(item.src_location_id);
+    if (item.dest_location_id) vals.location_dest_id = odooId(item.dest_location_id);
+    if (item.picking_type_id) vals.picking_type_id = odooId(item.picking_type_id);
+  }
+  // Remove fields that are display-only or not writable
+  delete vals.complete_name;
+  return vals;
+}
+
+// Compute all changes between current data and the fetched snapshot
+function computeChanges(current, snapshot) {
+  if (!snapshot) return { creates: [], updates: [], deletes: [], total: 0 };
+  const creates = [], updates = [], deletes = [];
+
+  // Helper: compare lists by ID
+  const diffList = (curItems, snapItems, type) => {
+    const snapMap = new Map(snapItems.map(i => [i.id, i]));
+    const curMap = new Map(curItems.map(i => [i.id, i]));
+    for (const item of curItems) {
+      const oid = odooId(item.id);
+      if (!oid) { creates.push({ type, item }); continue; }
+      const prev = snapMap.get(item.id);
+      if (!prev) { creates.push({ type, item }); continue; }
+      const changed = diffData(item.data, prev.data);
+      // Also check connection fields for ops/rules
+      let connChanged = false;
+      if (type === "operation_type") {
+        connChanged = item.src_location_id !== prev.src_location_id || item.dest_location_id !== prev.dest_location_id;
+      }
+      if (type === "rule") {
+        connChanged = item.src_location_id !== prev.src_location_id || item.dest_location_id !== prev.dest_location_id || item.picking_type_id !== prev.picking_type_id;
+      }
+      if (changed || connChanged || item.label !== prev.label) {
+        updates.push({ type, item, oid, changed });
+      }
+    }
+    for (const item of snapItems) {
+      if (!curMap.has(item.id) && odooId(item.id)) {
+        deletes.push({ type, item, oid: odooId(item.id) });
+      }
+    }
+  };
+
+  diffList(current.nodes, snapshot.nodes, current.nodes[0]?.type || "location");
+  // Fix: diff nodes by type
+  const curWh = current.nodes.filter(n => n.type === "warehouse");
+  const snapWh = snapshot.nodes.filter(n => n.type === "warehouse");
+  const curLoc = current.nodes.filter(n => n.type === "location");
+  const snapLoc = snapshot.nodes.filter(n => n.type === "location");
+  // Reset and redo properly
+  creates.length = 0; updates.length = 0; deletes.length = 0;
+  diffList(curWh, snapWh, "warehouse");
+  diffList(curLoc, snapLoc, "location");
+  diffList(current.operationTypes, snapshot.operationTypes, "operation_type");
+
+  // Flatten rules from routes
+  const flatRules = (routes) => {
+    const rules = [];
+    for (const r of routes) for (const rl of r.rules) rules.push({ ...rl, _routeId: r.id });
+    return rules;
+  };
+  diffList(current.routes, snapshot.routes, "route");
+  diffList(flatRules(current.routes), flatRules(snapshot.routes), "rule");
+  diffList(current.putawayRules, snapshot.putawayRules, "putaway_rule");
+
+  return { creates, updates, deletes, total: creates.length + updates.length + deletes.length };
+}
+
+// Authenticate and pull the full inventory config, returning an app-ready data object.
+async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
+  // 1. Authenticate via session (api key used as password)
+  const session = await odooRpc(cfg, "/web/session/authenticate", {
+    db: cfg.db, login: cfg.username, password: cfg.apiKey,
+  });
+  if (!session?.uid) throw new Error("Authentication failed — check URL, database, username and API key.");
+
+  // 2. search_read helper (single batch)
+  const sr = (model, domain, fields, limit = 500) =>
+    odooRpc(cfg, "/web/dataset/call_kw", {
+      model, method: "search_read",
+      args: [domain], kwargs: { fields, limit, context: session.user_context || {} },
+    });
+
+  // 2b. Paginated fetch for large models
+  const fetchAll = async (model, domain, fields, batchSize = 500, onProgress) => {
+    let off = 0, results = [];
+    while (true) {
+      const batch = await odooRpc(cfg, "/web/dataset/call_kw", {
+        model, method: "search_read",
+        args: [domain], kwargs: { fields, limit: batchSize, offset: off, context: session.user_context || {} },
+      });
+      results.push(...batch);
+      if (onProgress) onProgress(results.length);
+      if (batch.length < batchSize) break;
+      off += batchSize;
+    }
+    return results;
+  };
+
+  // 3. Fetch all models (locations and rules paged; others are bounded)
+  onProgress("Fetching warehouses, routes & operations…");
+  const [warehouses, pickingTypes, routes, putaway] = await Promise.all([
+    sr("stock.warehouse", [], ["name","code","reception_steps","delivery_steps","buy_to_resupply","manufacture_to_resupply"]),
+    sr("stock.picking.type", [["active","=",true]], ["name","code","sequence_code","default_location_src_id","default_location_dest_id","create_backorder","reservation_method","use_create_lots","use_existing_lots","show_reserved"]),
+    sr("stock.route", [["active","=",true]], ["name","active","product_selectable","product_categ_selectable","warehouse_selectable","sale_selectable","rule_ids"]),
+    sr("stock.putaway.rule", [], ["product_id","category_id","location_in_id","location_out_id","sequence"]),
+  ]);
+  onProgress("Fetching locations…");
+  const locations = await fetchAll("stock.location", [["usage","!=","view"],["active","=",true]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location"], 500, n => onProgress(`Fetching locations… (${n})`));
+  onProgress("Fetching rules…");
+  const rules = await fetchAll("stock.rule", [["active","=",true]], ["name","action","procure_method","location_src_id","location_dest_id","picking_type_id","auto","delay","propagate_cancel","route_id"], 500, n => onProgress(`Fetching rules… (${n})`));
+
+  // 4. ID → app-id lookup maps
+  const rid = (field) => Array.isArray(field) ? field[0] : field; // unwrap many2one [id, name]
+  const rname = (field) => Array.isArray(field) ? field[1] : "";
+  let locMap = new Map(locations.map(l => [l.id, `loc-${l.id}`]));
+  const opMap  = new Map(pickingTypes.map(p => [p.id, `op-${p.id}`]));
+
+  // 4b. Find location IDs referenced by rules/ops but missing from fetched locations
+  const referencedLocIds = new Set();
+  for (const rule of rules) {
+    const src = rid(rule.location_src_id); if (src && !locMap.has(src)) referencedLocIds.add(src);
+    const dst = rid(rule.location_dest_id); if (dst && !locMap.has(dst)) referencedLocIds.add(dst);
+  }
+  for (const pt of pickingTypes) {
+    const src = rid(pt.default_location_src_id); if (src && !locMap.has(src)) referencedLocIds.add(src);
+    const dst = rid(pt.default_location_dest_id); if (dst && !locMap.has(dst)) referencedLocIds.add(dst);
+  }
+  if (referencedLocIds.size > 0) {
+    onProgress(`Fetching ${referencedLocIds.size} missing locations…`);
+    const missingLocs = await sr("stock.location", [["id","in",[...referencedLocIds]]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location"], referencedLocIds.size);
+    locations.push(...missingLocs);
+    locMap = new Map(locations.map(l => [l.id, `loc-${l.id}`]));
+  }
+
+  // 5. Build nodes — positions assigned by autoLayout after import
+  const COL_W = 210, ROW_H = 80, PAD = 60;
+  const warehouseNodes = warehouses.map((wh, i) => ({
+    id: `wh-${wh.id}`, type: "warehouse",
+    label: wh.name, x: PAD + i * COL_W, y: 10,
+    data: { code: wh.code, name: wh.name, reception_steps: wh.reception_steps || "one_step",
+            delivery_steps: wh.delivery_steps || "one_step",
+            buy_to_resupply: !!wh.buy_to_resupply, manufacture_to_resupply: !!wh.manufacture_to_resupply },
+  }));
+  const locationNodes = locations.map((loc, i) => ({
+    id: `loc-${loc.id}`, type: "location",
+    label: loc.complete_name?.split("/").pop()?.trim() || loc.complete_name,
+    x: PAD + (i % 6) * COL_W, y: 100 + Math.floor(i / 6) * ROW_H,
+    data: { complete_name: loc.complete_name, usage: loc.usage,
+            removal_strategy: rname(loc.removal_strategy_id) || "fifo", barcode: loc.barcode || "",
+            scrap_location: !!loc.scrap_location,
+            replenish_location: !!loc.replenish_location },
+  }));
+
+  // 6. Operation types
+  const operationTypes = pickingTypes
+    .filter(pt => pt.default_location_src_id && pt.default_location_dest_id)
+    .map(pt => ({
+      id: `op-${pt.id}`, label: pt.name,
+      code: pt.code, sequence_code: pt.sequence_code || "",
+      src_location_id:  locMap.get(rid(pt.default_location_src_id))  || "",
+      dest_location_id: locMap.get(rid(pt.default_location_dest_id)) || "",
+      data: { name: pt.name, code: pt.code, sequence_code: pt.sequence_code || "",
+              create_backorder: pt.create_backorder || "ask",
+              reservation_method: pt.reservation_method || "at_confirm",
+              use_create_lots: !!pt.use_create_lots, use_existing_lots: !!pt.use_existing_lots,
+              show_reserved: !!pt.show_reserved },
+    }));
+
+  // 7. Routes + nested rules
+  const rulesByRoute = new Map();
+  for (const rule of rules) {
+    const rId = rid(rule.route_id);
+    if (!rulesByRoute.has(rId)) rulesByRoute.set(rId, []);
+    rulesByRoute.get(rId).push(rule);
+  }
+  const appRoutes = routes.map((route, i) => ({
+    id: `route-${route.id}`, label: route.name,
+    colorIdx: i % ROUTE_COLORS.length,
+    data: { name: route.name, active: route.active,
+            product_selectable: !!route.product_selectable, product_categ_selectable: !!route.product_categ_selectable,
+            warehouse_selectable: !!route.warehouse_selectable, sale_selectable: !!route.sale_selectable },
+    rules: (rulesByRoute.get(route.id) || []).map(rule => ({
+      id: `rl-${rule.id}`, label: rule.name,
+      action: rule.action, procure_method: rule.procure_method,
+      src_location_id:  locMap.get(rid(rule.location_src_id))  || "",
+      dest_location_id: locMap.get(rid(rule.location_dest_id)) || "",
+      picking_type_id:  opMap.get(rid(rule.picking_type_id))   || "",
+      auto: rule.auto || "manual",
+      data: { name: rule.name, action: rule.action, procure_method: rule.procure_method,
+              auto: rule.auto || "manual", propagate_cancel: !!rule.propagate_cancel, delay: rule.delay || 0 },
+    })),
+  }));
+
+  // 8. Putaway rules
+  const putawayRules = putaway.map(p => ({
+    id: `pa-${p.id}`,
+    location_in_id: locMap.get(rid(p.location_in_id)) || "",
+    location_out: rname(p.location_out_id),
+    product: rname(p.product_id),
+    category: rname(p.category_id),
+    sequence: p.sequence ?? 99,
+  }));
+
+  const data = { nodes: [...warehouseNodes, ...locationNodes], operationTypes, routes: appRoutes, putawayRules };
+  return { data, userContext: session.user_context || {} };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═════════════════════════════════════════════════════════════════════════════
@@ -685,11 +1048,165 @@ export default function App() {
   const [routeFilter, setRouteFilter] = useState("");
   const [multiSel, setMultiSel] = useState(new Set());
   const [showTips, setShowTips] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState(null); // null | { loading, progress } | { ok: true } | { error: string }
+  const [pushStatus, setPushStatus] = useState(null); // null | { loading, progress } | { ok } | { error }
+  const [showPushModal, setShowPushModal] = useState(null); // null | changes object
+  const [fetchedSnapshot, setFetchedSnapshot] = useState(null); // deep copy of data after last fetch
+  const [odooCtx, setOdooCtx] = useState({}); // Odoo user_context for write calls
+  const [hideUnused, setHideUnused] = useState(false);
   const svgRef = useRef(null);
+  const importRef = useRef(null);
   const historyRef = useRef([]);
   const futureRef = useRef([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+
+  // Used location IDs (referenced in any rule src/dest or putaway rule)
+  const usedLocationIds = useMemo(() => {
+    const s = new Set();
+    for (const route of data.routes) for (const rule of route.rules) {
+      if (rule.src_location_id) s.add(rule.src_location_id);
+      if (rule.dest_location_id) s.add(rule.dest_location_id);
+    }
+    for (const pr of data.putawayRules) {
+      if (pr.location_in_id) s.add(pr.location_in_id);
+    }
+    return s;
+  }, [data.routes, data.putawayRules]);
+
+  // Export diagram to JSON file
+  const handleExport = useCallback(() => {
+    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data, apiCfg }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "odoo-inventory.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [data, apiCfg]);
+
+  // Import diagram from JSON file
+  const handleImport = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (parsed.version !== 1 || !parsed.data) throw new Error("Invalid file format");
+        setData(prev => {
+          historyRef.current = [...historyRef.current.slice(-49), prev];
+          futureRef.current = [];
+          setCanUndo(true); setCanRedo(false);
+          return parsed.data;
+        });
+        if (parsed.apiCfg) setApiCfg(parsed.apiCfg);
+        setSel(null);
+      } catch (err) {
+        alert("Import failed: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }, []);
+
+  // Save a single item to Odoo (returns { ok } or { error })
+  const saveItemToOdoo = useCallback(async (type, id, item) => {
+    if (!apiCfg.url) return { error: "No Odoo connection configured" };
+    const model = ODOO_MODEL[type];
+    if (!model) return { error: `Unknown type: ${type}` };
+    const oid = odooId(id);
+    try {
+      if (oid) {
+        // Update existing
+        const vals = toOdooVals(type, item);
+        if (type === "rule") {
+          // Find parent route for route_id
+          const parentRoute = data.routes.find(r => r.rules.some(rl => rl.id === id));
+          const routeOid = parentRoute ? odooId(parentRoute.id) : null;
+          if (routeOid) vals.route_id = routeOid;
+        }
+        await odooWrite(apiCfg, odooCtx, model, oid, vals);
+        return { ok: true };
+      } else {
+        // Create new
+        const vals = toOdooVals(type, item);
+        if (type === "rule") {
+          const parentRoute = data.routes.find(r => r.rules.some(rl => rl.id === id));
+          const routeOid = parentRoute ? odooId(parentRoute.id) : null;
+          if (routeOid) vals.route_id = routeOid;
+        }
+        const newId = await odooCreate(apiCfg, odooCtx, model, vals);
+        // Update app ID to reflect the new Odoo ID
+        const prefix = id.split("-")[0];
+        const newAppId = `${prefix}-${newId}`;
+        setData(p => {
+          const n = { ...p };
+          if (["warehouse", "location"].includes(type)) {
+            n.nodes = p.nodes.map(x => x.id === id ? { ...x, id: newAppId } : x);
+          } else if (type === "operation_type") {
+            n.operationTypes = p.operationTypes.map(x => x.id === id ? { ...x, id: newAppId } : x);
+          } else if (type === "route") {
+            n.routes = p.routes.map(x => x.id === id ? { ...x, id: newAppId } : x);
+          } else if (type === "rule") {
+            n.routes = p.routes.map(r => ({ ...r, rules: r.rules.map(x => x.id === id ? { ...x, id: newAppId } : x) }));
+          } else if (type === "putaway_rule") {
+            n.putawayRules = p.putawayRules.map(x => x.id === id ? { ...x, id: newAppId } : x);
+          }
+          return n;
+        });
+        return { ok: true, newId: newAppId };
+      }
+    } catch (err) {
+      return { error: err.message || "Save failed" };
+    }
+  }, [apiCfg, odooCtx, data.routes]);
+
+  // Bulk push all changes to Odoo
+  const handlePushToOdoo = useCallback(async () => {
+    const changes = computeChanges(data, fetchedSnapshot);
+    if (changes.total === 0) { setPushStatus({ ok: "No changes to push" }); setTimeout(() => setPushStatus(null), 2000); return; }
+    setShowPushModal(changes);
+  }, [data, fetchedSnapshot]);
+
+  const executePush = useCallback(async (changes) => {
+    setShowPushModal(null);
+    setPushStatus({ loading: true, progress: "Starting…" });
+    const errors = [];
+    // Creates first
+    for (let i = 0; i < changes.creates.length; i++) {
+      const { type, item } = changes.creates[i];
+      setPushStatus({ loading: true, progress: `Creating ${type} ${i + 1}/${changes.creates.length}…` });
+      const res = await saveItemToOdoo(type, item.id, item);
+      if (res.error) { errors.push(`Create ${type} "${item.label}": ${res.error}`); break; }
+    }
+    if (errors.length === 0) {
+      // Updates
+      for (let i = 0; i < changes.updates.length; i++) {
+        const { type, item } = changes.updates[i];
+        setPushStatus({ loading: true, progress: `Updating ${type} ${i + 1}/${changes.updates.length}…` });
+        const res = await saveItemToOdoo(type, item.id, item);
+        if (res.error) { errors.push(`Update ${type} "${item.label}": ${res.error}`); break; }
+      }
+    }
+    if (errors.length === 0) {
+      // Deletes (deactivate)
+      for (let i = 0; i < changes.deletes.length; i++) {
+        const { type, oid } = changes.deletes[i];
+        const model = ODOO_MODEL[type];
+        setPushStatus({ loading: true, progress: `Deactivating ${type} ${i + 1}/${changes.deletes.length}…` });
+        try { await odooDeactivate(apiCfg, odooCtx, model, oid); }
+        catch (err) { errors.push(`Deactivate ${type} ID ${oid}: ${err.message}`); break; }
+      }
+    }
+    if (errors.length > 0) {
+      setPushStatus({ error: errors.join("\n") });
+    } else {
+      setPushStatus({ ok: `Pushed ${changes.total} changes` });
+      // Re-snapshot current state as the new baseline
+      setFetchedSnapshot(JSON.parse(JSON.stringify(data)));
+      setTimeout(() => setPushStatus(null), 3000);
+    }
+  }, [apiCfg, odooCtx, data, saveItemToOdoo]);
 
   // Putaway rule handlers
   const putawayUpdate = useCallback((ruleId, upd) => {
@@ -796,7 +1313,7 @@ export default function App() {
         const locs = p.nodes.filter(x => x.type === "location");
         n.operationTypes = [...p.operationTypes, { id: `op-${ts}`, label: "New Operation", code: "internal", sequence_code: "NEW", src_location_id: locs[0]?.id || "", dest_location_id: locs[1]?.id || locs[0]?.id || "", data: { name: "New Operation", code: "internal", sequence_code: "NEW", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true } }];
       } else if (type === "route") {
-        n.routes = [...p.routes, { id: `route-${ts}`, label: "New Route", colorIdx: p.routes.length % ROUTE_COLORS.length, data: { name: "New Route", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, purchase_selectable: false }, rules: [] }];
+        n.routes = [...p.routes, { id: `route-${ts}`, label: "New Route", colorIdx: p.routes.length % ROUTE_COLORS.length, data: { name: "New Route", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, }, rules: [] }];
       }
       return n;
     });
@@ -867,23 +1384,36 @@ export default function App() {
       setCanUndo(true);
       setCanRedo(false);
 
-      const COL_W = 210, ROW_H = 80, PAD_X = 60;
-      const WH_Y   = 15;  // y for warehouse nodes (header row)
-      const PROD_Y = 80;  // y-start for production/transit top lane
-      const MAIN_Y = 170; // y-start for main flow (supplier→internal→customer)
+      const COL_W = 210, ROW_H = 72, PAD_X = 60;
+      const MAX_PER_COL = 8; // wrap to sub-columns when tier has many nodes
+      const ZONE_GAP = 100; // extra gap between usage zones (vendor | internal | customer)
+      const WH_Y   = 15;
+      const PROD_Y = 80;
+      const MAIN_Y = 170;
 
-      const flowNodes = p.nodes.filter(n => n.type === "location");
+      // Compute visible nodes (respect hideUnused)
+      const usedIds = new Set();
+      if (hideUnused) {
+        for (const route of p.routes) for (const rule of route.rules) {
+          if (rule.src_location_id) usedIds.add(rule.src_location_id);
+          if (rule.dest_location_id) usedIds.add(rule.dest_location_id);
+        }
+        for (const pr of p.putawayRules) { if (pr.location_in_id) usedIds.add(pr.location_in_id); }
+      }
+      const flowNodes = p.nodes.filter(n => n.type === "location" && (!hideUnused || usedIds.has(n.id)));
       const warehouseNodes = p.nodes.filter(n => n.type === "warehouse");
       const nodeIds = new Set(flowNodes.map(n => n.id));
 
       // Classify by usage
-      const usage = id => flowNodes.find(n => n.id === id)?.data?.usage || "";
+      const usageMap = new Map(flowNodes.map(n => [n.id, n.data?.usage || ""]));
+      const usage = id => usageMap.get(id) || "";
       const isSupplier  = id => usage(id) === "supplier";
       const isCustomer  = id => usage(id) === "customer";
-      const isProd      = id => ["production"].includes(usage(id));
+      const isProd      = id => usage(id) === "production";
       const isTransit   = id => usage(id) === "transit";
+      const isInventory = id => usage(id) === "inventory";
 
-      // Build unique directed edges (skip cross-supplier and cross-customer edges)
+      // Build unique directed edges
       const edgeSet = new Set();
       const addEdge = (s, d) => { if (nodeIds.has(s) && nodeIds.has(d) && s !== d) edgeSet.add(`${s}\t${d}`); };
       for (const route of p.routes)
@@ -891,13 +1421,13 @@ export default function App() {
       for (const op of p.operationTypes) addEdge(op.src_location_id, op.dest_location_id);
       const edges = [...edgeSet].map(e => e.split('\t'));
 
-      // Build adjacency (ignore edges that would go FROM customer or TO supplier)
+      // Build adjacency (ignore edges FROM customer or TO supplier)
       const adj = {};
       for (const n of flowNodes) adj[n.id] = [];
       for (const [s, d] of edges)
         if (!isCustomer(s) && !isSupplier(d)) adj[s].push(d);
 
-      // Compute in-degrees for BFS (after adjacency pruning)
+      // In-degrees
       const inDeg = {};
       for (const n of flowNodes) inDeg[n.id] = 0;
       for (const [s, d] of edges)
@@ -908,10 +1438,10 @@ export default function App() {
       const seeds = flowNodes.filter(n => isSupplier(n.id) || inDeg[n.id] === 0);
       const queue = seeds.map(n => n.id);
       for (const id of queue) depth[id] = isSupplier(id) ? 0 : 1;
-      for (let qi = 0; qi < queue.length && qi < 5000; qi++) {
+      for (let qi = 0; qi < queue.length && qi < 10000; qi++) {
         const cur = queue[qi];
         for (const next of adj[cur]) {
-          if (isCustomer(next)) continue; // customers assigned later
+          if (isCustomer(next)) continue;
           const nd = depth[cur] + 1;
           if (depth[next] === undefined || depth[next] < nd) {
             depth[next] = nd; queue.push(next);
@@ -920,61 +1450,129 @@ export default function App() {
       }
       for (const n of flowNodes) if (depth[n.id] === undefined) depth[n.id] = 1;
 
-      // Force customers to rightmost tier
+      // Force customers to rightmost tier, inventory nodes to a side lane
       const maxMainDepth = Math.max(0, ...flowNodes
-        .filter(n => !isCustomer(n.id))
+        .filter(n => !isCustomer(n.id) && !isInventory(n.id))
         .map(n => depth[n.id]));
-      for (const n of flowNodes) if (isCustomer(n.id)) depth[n.id] = maxMainDepth + 1;
+      for (const n of flowNodes) {
+        if (isCustomer(n.id)) depth[n.id] = maxMainDepth + 1;
+      }
 
-      // Separate nodes into lanes: production/transit at top, rest in main lane
-      const prodLane = {}, mainLane = {};
+      // Separate into three lanes: production/transit, main flow, inventory
+      const prodLane = {}, mainLane = {}, invLane = {};
       for (const n of flowNodes) {
         const d = depth[n.id];
-        const lane = (isProd(n.id) || isTransit(n.id)) ? prodLane : mainLane;
+        const lane = (isProd(n.id) || isTransit(n.id)) ? prodLane : isInventory(n.id) ? invLane : mainLane;
         if (!lane[d]) lane[d] = [];
         lane[d].push(n.id);
       }
 
-      // Build a unified column index across all tiers
+      // Build unified column index — each tier occupies enough sub-columns for its widest lane
       const allTiers = [...new Set([
         ...Object.keys(mainLane).map(Number),
         ...Object.keys(prodLane).map(Number),
+        ...Object.keys(invLane).map(Number),
       ])].sort((a, b) => a - b);
-      const tierCol = {};
-      allTiers.forEach((t, i) => { tierCol[t] = i; });
 
-      // Assign positions
+      // Calculate sub-columns needed per tier (for wrapping large groups)
+      const tierSubCols = {};
+      for (const t of allTiers) {
+        const counts = [mainLane[t]?.length || 0, prodLane[t]?.length || 0, invLane[t]?.length || 0];
+        tierSubCols[t] = Math.max(1, Math.ceil(Math.max(...counts) / MAX_PER_COL));
+      }
+      // Cumulative column offset
+      const tierColStart = {};
+      let colCursor = 0;
+      for (const t of allTiers) {
+        tierColStart[t] = colCursor;
+        colCursor += tierSubCols[t];
+      }
+
+      // Assign positions with sub-column wrapping
       const newPos = {};
-      for (const [tier, ids] of Object.entries(mainLane)) {
-        const ti = tierCol[Number(tier)];
-        ids.forEach((id, yi) => { newPos[id] = { x: PAD_X + ti * COL_W, y: MAIN_Y + yi * ROW_H }; });
-      }
-      for (const [tier, ids] of Object.entries(prodLane)) {
-        const ti = tierCol[Number(tier)];
-        ids.forEach((id, yi) => { newPos[id] = { x: PAD_X + ti * COL_W, y: PROD_Y + yi * ROW_H }; });
-      }
+      const placeLane = (lane, baseY) => {
+        for (const [tier, ids] of Object.entries(lane)) {
+          const t = Number(tier);
+          const startCol = tierColStart[t];
+          ids.forEach((id, i) => {
+            const subCol = Math.floor(i / MAX_PER_COL);
+            const row = i % MAX_PER_COL;
+            newPos[id] = { x: PAD_X + (startCol + subCol) * COL_W, y: baseY + row * ROW_H };
+          });
+        }
+      };
+      placeLane(mainLane, MAIN_Y);
+      placeLane(prodLane, PROD_Y);
+      // Inventory lane: below main lane
+      const mainMaxY = Math.max(MAIN_Y, ...Object.values(mainLane).map(ids => MAIN_Y + ids.length * ROW_H));
+      placeLane(invLane, mainMaxY + ZONE_GAP);
 
       // Warehouses: top-left header row
       warehouseNodes.forEach((n, i) => { newPos[n.id] = { x: PAD_X + i * COL_W, y: WH_Y }; });
 
       return { ...p, nodes: p.nodes.map(n => newPos[n.id] ? { ...n, ...newPos[n.id] } : n) };
     });
-  }, []);
+  }, [hideUnused]);
 
   const fitToContent = useCallback(() => {
-    if (!svgRef.current || data.nodes.length === 0) return;
+    if (!svgRef.current) return;
+    const visible = data.nodes.filter(n => !(hideUnused && n.type === "location" && !usedLocationIds.has(n.id)));
+    if (visible.length === 0) return;
     const PAD = 40;
-    const minX = Math.min(...data.nodes.map(n => n.x));
-    const minY = Math.min(...data.nodes.map(n => n.y));
-    const maxX = Math.max(...data.nodes.map(n => n.x + NW));
-    const maxY = Math.max(...data.nodes.map(n => n.y + NH));
+    const minX = Math.min(...visible.map(n => n.x));
+    const minY = Math.min(...visible.map(n => n.y));
+    const maxX = Math.max(...visible.map(n => n.x + NW));
+    const maxY = Math.max(...visible.map(n => n.y + NH));
     const r = svgRef.current.getBoundingClientRect();
     const vw = r.width, vh = r.height;
     const contentW = maxX - minX, contentH = maxY - minY;
     const ns = Math.min(Math.max((vw - PAD * 2) / contentW, 0.2), (vh - PAD * 2) / contentH, 3);
     setScale(ns);
     setOffset({ x: PAD - minX * ns, y: PAD - minY * ns });
-  }, [data.nodes]);
+  }, [data.nodes, hideUnused, usedLocationIds]);
+
+  // Auto-layout + fit when hideUnused toggles
+  const hideUnusedRef = useRef(hideUnused);
+  useEffect(() => {
+    if (hideUnusedRef.current !== hideUnused) {
+      hideUnusedRef.current = hideUnused;
+      autoLayout();
+      setTimeout(() => fitToContent(), 50);
+    }
+  }, [hideUnused, autoLayout, fitToContent]);
+
+  const handleFetchFromOdoo = useCallback(async () => {
+    if (!apiCfg.url || !apiCfg.db || !apiCfg.username || !apiCfg.apiKey) {
+      setShowCfg(true); // prompt user to fill in credentials
+      return;
+    }
+    setFetchStatus({ loading: true, progress: "Connecting…" });
+    try {
+      const result = await fetchInventoryFromOdoo(apiCfg, msg => setFetchStatus({ loading: true, progress: msg }));
+      const fetched = result.data;
+      // Push current data to history so fetch is undoable
+      setData(prev => {
+        historyRef.current = [...historyRef.current.slice(-49), prev];
+        futureRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+        return fetched;
+      });
+      // Save snapshot for diffing + session context for write-back
+      setFetchedSnapshot(JSON.parse(JSON.stringify(fetched)));
+      setOdooCtx(result.userContext);
+      setSel(null);
+      setFetchStatus({ ok: true });
+      // Auto-layout after a tick so state has settled
+      setTimeout(() => {
+        autoLayout();
+        fitToContent();
+        setFetchStatus(null);
+      }, 100);
+    } catch (err) {
+      setFetchStatus({ error: err.message || "Unknown error" });
+    }
+  }, [apiCfg, autoLayout, fitToContent]);
 
   // Pan/drag handlers
   const onCanvasDown = useCallback((e) => {
@@ -1033,6 +1631,21 @@ export default function App() {
 
   const selRuleId = sel?.type === "rule" ? sel.id : null;
 
+  // When a route is selected, compute which nodes & rules belong to it for highlighting
+  const routeHighlight = useMemo(() => {
+    if (sel?.type !== "route") return null;
+    const route = data.routes.find(r => r.id === sel.id);
+    if (!route) return null;
+    const nodeIds = new Set();
+    const ruleIds = new Set();
+    for (const rule of route.rules) {
+      ruleIds.add(rule.id);
+      if (rule.src_location_id) nodeIds.add(rule.src_location_id);
+      if (rule.dest_location_id) nodeIds.add(rule.dest_location_id);
+    }
+    return { routeId: sel.id, nodeIds, ruleIds };
+  }, [sel, data.routes]);
+
   return (
     <div style={{ width: "100%", height: "100vh", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -1047,10 +1660,21 @@ export default function App() {
           </span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
+          <Btn small icon="download" onClick={handleFetchFromOdoo} disabled={!!fetchStatus?.loading} variant={fetchStatus?.error ? "danger" : "ghost"} title="Fetch live data from Odoo (replaces current diagram)">
+            {fetchStatus?.loading ? (fetchStatus.progress || "Fetching…") : "Fetch from Odoo"}
+          </Btn>
+          <Btn small icon="upload" onClick={handlePushToOdoo} disabled={!fetchedSnapshot || !!pushStatus?.loading} variant={pushStatus?.error ? "danger" : pushStatus?.ok ? "default" : "ghost"} title="Push all changes to Odoo">
+            {pushStatus?.loading ? (pushStatus.progress || "Pushing…") : pushStatus?.ok || "Push to Odoo"}
+          </Btn>
+          <div style={{ width: 1, height: 18, background: T.border, alignSelf: "center", margin: "0 2px" }} />
+          <Btn small icon="upload" onClick={handleExport} variant="ghost" title="Export diagram as JSON">Export</Btn>
+          <Btn small icon="download" onClick={() => importRef.current?.click()} variant="ghost" title="Import diagram from JSON">Import</Btn>
+          <input ref={importRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
           <Btn small icon="add" onClick={() => setShowAdd(true)}>Add</Btn>
           <Btn small icon="api" onClick={() => setShowApi(true)}>API</Btn>
           <Btn small icon="settings" onClick={() => setShowCfg(true)} />
           <Btn small variant="ghost" onClick={autoLayout} title="Auto-layout nodes">⊞</Btn>
+          <Btn small variant="ghost" onClick={() => setHideUnused(v => !v)} title={hideUnused ? "Show all locations" : "Hide locations not used in any rule"} style={hideUnused ? { background: T.accentSoft, color: T.accent } : {}}>{hideUnused ? "Show all" : "Hide unused"}</Btn>
           <Btn small variant="ghost" onClick={() => setIsDark(d => !d)} title={isDark ? "Switch to light mode" : "Switch to dark mode"}>{isDark ? "☀" : "☾"}</Btn>
           <div style={{ width: 1, height: 18, background: T.border, alignSelf: "center", margin: "0 2px" }} />
           <Btn small variant="ghost" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</Btn>
@@ -1062,9 +1686,24 @@ export default function App() {
         </div>
       </div>
 
+      {/* ERROR BANNERS */}
+      {fetchStatus?.error && (
+        <div style={{ background: T.roseSoft, borderBottom: `1px solid ${T.rose}`, padding: "7px 16px", display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: T.rose, flexShrink: 0, zIndex: 50 }}>
+          <span style={{ flex: 1, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{fetchStatus.error}</span>
+          <button onClick={() => setFetchStatus(null)} style={{ background: "none", border: "none", cursor: "pointer", color: T.rose, fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
+      {pushStatus?.error && (
+        <div style={{ background: T.roseSoft, borderBottom: `1px solid ${T.rose}`, padding: "7px 16px", display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: T.rose, flexShrink: 0, zIndex: 50 }}>
+          <span style={{ fontWeight: 600, flexShrink: 0 }}>Push failed:</span>
+          <span style={{ flex: 1, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{pushStatus.error}</span>
+          <button onClick={() => setPushStatus(null)} style={{ background: "none", border: "none", cursor: "pointer", color: T.rose, fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
+
       <div style={{ flex: 1, position: "relative", display: "flex" }}>
         {/* ROUTE SIDEBAR */}
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 210, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 230, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
           <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Routes & Rules</span>
             <input
@@ -1072,7 +1711,7 @@ export default function App() {
               placeholder="Filter…"
               value={routeFilter}
               onChange={e => setRouteFilter(e.target.value)}
-              style={{ width: "100%", padding: "5px 8px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 10, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "5px 8px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
             />
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
@@ -1090,7 +1729,7 @@ export default function App() {
                   <div onClick={() => doSelect(route.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", cursor: "pointer" }}
                     onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <div style={{ width: 8, height: 8, borderRadius: 2, background: rc.stroke, opacity: h ? 0.3 : 1, flexShrink: 0 }} />
-                    <span style={{ fontSize: 10, fontWeight: 600, color: h ? T.textDim : T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: h ? T.textDim : T.text, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{route.label}</span>
                     <button onClick={e => { e.stopPropagation(); addRuleToRoute(route.id); }} title="Add rule to this route" style={{ background: "none", border: "none", cursor: "pointer", padding: 1, display: "flex", opacity: 0.5 }}
                       onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0.5}>
                       <SI d={ICONS.add} size={12} color={rc.stroke} />
@@ -1103,15 +1742,15 @@ export default function App() {
                     {route.rules.map(rule => (
                       <div key={rule.id} onClick={() => doSelect(rule.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 12px 4px 28px", cursor: "pointer", background: selRuleId === rule.id ? `${rc.stroke}15` : "transparent", borderLeft: selRuleId === rule.id ? `2px solid ${rc.stroke}` : "2px solid transparent" }}
                         onMouseEnter={e => { if (selRuleId !== rule.id) e.currentTarget.style.background = T.surfaceHover; }} onMouseLeave={e => { if (selRuleId !== rule.id) e.currentTarget.style.background = "transparent"; }}>
-                        <span style={{ fontSize: 9, color: rc.stroke, fontFamily: "'IBM Plex Mono', monospace" }}>→</span>
-                        <span style={{ fontSize: 9, color: T.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.label}</span>
-                        <span style={{ fontSize: 7, color: T.textDim, marginLeft: "auto", fontFamily: "'IBM Plex Mono', monospace" }}>{rule.action}</span>
+                        <span style={{ fontSize: 10, color: rc.stroke, fontFamily: "'IBM Plex Mono', monospace" }}>→</span>
+                        <span style={{ fontSize: 10, color: T.textSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rule.label}</span>
+                        <span style={{ fontSize: 8, color: T.textDim, marginLeft: "auto", fontFamily: "'IBM Plex Mono', monospace" }}>{rule.action}</span>
                       </div>
                     ))}
                     <div onClick={() => addRuleToRoute(route.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 12px 4px 28px", cursor: "pointer", borderLeft: "2px solid transparent", opacity: 0.45 }}
                       onMouseEnter={e => { e.currentTarget.style.background = T.surfaceHover; e.currentTarget.style.opacity = 0.8; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.opacity = 0.45; }}>
                       <SI d={ICONS.add} size={9} color={rc.stroke} />
-                      <span style={{ fontSize: 8, color: rc.stroke, fontFamily: "'IBM Plex Mono', monospace" }}>Add rule</span>
+                      <span style={{ fontSize: 9, color: rc.stroke, fontFamily: "'IBM Plex Mono', monospace" }}>Add rule</span>
                     </div>
                   </>)}
                 </div>
@@ -1130,7 +1769,7 @@ export default function App() {
         </div>
 
         {/* SVG CANVAS */}
-        <div style={{ flex: 1, marginLeft: 210, position: "relative" }}>
+        <div style={{ flex: 1, marginLeft: 230, position: "relative" }}>
           <svg ref={svgRef} width="100%" height="100%" style={{ cursor: isPan ? "grabbing" : "default", background: T.bg }} onMouseDown={onCanvasDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onWheel={onWheel}>
             <defs>
               <pattern id="dots" width={24 * scale} height={24 * scale} patternUnits="userSpaceOnUse" x={offset.x % (24 * scale)} y={offset.y % (24 * scale)}>
@@ -1149,10 +1788,22 @@ export default function App() {
             <rect data-bg="true" width="100%" height="100%" fill="url(#dots)" />
 
             {/* OP TYPE GROUPS */}
-            {data.operationTypes.map(op => {
+            {(() => {
+              // Pre-compute label offset for ops sharing the same node pair
+              const pairCount = new Map();
+              for (const op of data.operationTypes) {
+                const key = [op.src_location_id, op.dest_location_id].sort().join("\t");
+                pairCount.set(key, (pairCount.get(key) || 0));
+                pairCount.set(key + ":" + op.id, pairCount.get(key));
+                pairCount.set(key, pairCount.get(key) + 1);
+              }
+              const LABEL_H = 14;
+              return data.operationTypes.map(op => {
               const sn = data.nodes.find(n => n.id === op.src_location_id);
               const dn = data.nodes.find(n => n.id === op.dest_location_id);
               if (!sn || !dn) return null;
+              const key = [op.src_location_id, op.dest_location_id].sort().join("\t");
+              const labelIdx = pairCount.get(key + ":" + op.id) || 0;
               const pad = 30;
               const mx = Math.min(sn.x, dn.x) - pad, my = Math.min(sn.y, dn.y) - pad - 20;
               const mxr = Math.max(sn.x + NW, dn.x + NW) + pad, myr = Math.max(sn.y + NH, dn.y + NH) + pad;
@@ -1164,19 +1815,21 @@ export default function App() {
               const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
               const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
 
+              const dimOp = routeHighlight && !routeHighlight.nodeIds.has(op.src_location_id) && !routeHighlight.nodeIds.has(op.dest_location_id);
               return (
-                <g key={op.id} onMouseDown={e => { if (e.target.getAttribute("data-gbg")) { e.stopPropagation(); doSelect(op.id); onDragStart(op.id, e, "group"); } }}>
+                <g key={op.id} opacity={dimOp ? 0.15 : 1} onMouseDown={e => { if (e.target.getAttribute("data-gbg")) { e.stopPropagation(); doSelect(op.id); onDragStart(op.id, e, "group"); } }}>
                   <rect data-gbg="true" x={sx} y={sy} width={sw} height={sh} rx={10 * scale} fill={`${col}06`} stroke={col} strokeWidth={isSel ? 1.5 : 1} strokeDasharray={`${6 * scale} ${4 * scale}`} strokeOpacity={isSel ? 0.7 : 0.2} style={{ cursor: "grab" }} />
-                  <foreignObject x={sx + 8 * scale} y={sy + 4 * scale} width={sw - 16 * scale} height={18 * scale}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, pointerEvents: "none" }}>
-                      <span style={{ fontSize: 8 * Math.max(scale, 0.7), fontWeight: 700, color: col, textTransform: "uppercase", letterSpacing: "0.7px", fontFamily: "'IBM Plex Mono', monospace", opacity: 0.8 }}>⛁ {op.label}</span>
-                      <span style={{ fontSize: 7 * Math.max(scale, 0.7), color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>{op.sequence_code}</span>
+                  <foreignObject x={sx + 8 * scale} y={sy + (4 + labelIdx * LABEL_H) * scale} width={sw - 16 * scale} height={16 * scale}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, pointerEvents: "none", overflow: "hidden" }}>
+                      <span style={{ fontSize: 8 * Math.max(scale, 0.7), fontWeight: 700, color: col, textTransform: "uppercase", letterSpacing: "0.7px", fontFamily: "'IBM Plex Mono', monospace", opacity: 0.8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>⛁ {op.label}</span>
+                      <span style={{ fontSize: 7 * Math.max(scale, 0.7), color: T.textDim, fontFamily: "'IBM Plex Mono', monospace", flexShrink: 0 }}>{op.sequence_code}</span>
                     </div>
                   </foreignObject>
                   <path d={bPath(p1, p2, ss, ds)} fill="none" stroke={col} strokeWidth={1.3} strokeOpacity={0.15} strokeDasharray="4 3" markerEnd={`url(#arr-${op.code})`} />
                 </g>
               );
-            })}
+            });
+            })()}
 
             {/* ROUTE RULE EDGES */}
             {(() => {
@@ -1195,8 +1848,9 @@ export default function App() {
                   const d = bPath(p1, p2, ss, ds, curveOff);
                   const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 - 10 };
                   const isSel = sel?.id === rule.id;
+                  const dimEdge = routeHighlight && !routeHighlight.ruleIds.has(rule.id);
                   return (
-                    <g key={rule.id} onClick={e => { e.stopPropagation(); doSelect(rule.id); }} style={{ cursor: "pointer" }}>
+                    <g key={rule.id} opacity={dimEdge ? 0.12 : 1} onClick={e => { e.stopPropagation(); doSelect(rule.id); }} style={{ cursor: "pointer" }}>
                       <path d={d} fill="none" stroke={rc.stroke} strokeWidth={isSel ? 6 : 3} strokeOpacity={isSel ? 0.2 : 0.05} />
                       <path d={d} fill="none" stroke={rc.stroke} strokeWidth={isSel ? 2.5 : 1.8} strokeOpacity={isSel ? 1 : 0.5} markerEnd={`url(#arr-r-${rc.stroke.replace('#', '')})`} />
                       <foreignObject x={mid.x - 50} y={mid.y - 8} width={100} height={18}>
@@ -1212,13 +1866,15 @@ export default function App() {
 
             {/* NODES */}
             {data.nodes.map(node => {
+              if (hideUnused && node.type === "location" && !usedLocationIds.has(node.id)) return null;
               const s = nodeStyles[node.type] || nodeStyles.location;
               const sx = node.x * scale + offset.x, sy = node.y * scale + offset.y;
               const isSel = sel?.id === node.id;
               const isMultiSel = multiSel.has(node.id);
+              const dimNode = routeHighlight && !routeHighlight.nodeIds.has(node.id);
               const paCount = node.type === "location" ? data.putawayRules.filter(r => r.location_in_id === node.id).length : 0;
               return (
-                <g key={node.id} onMouseDown={e => {
+                <g key={node.id} opacity={dimNode ? 0.18 : 1} onMouseDown={e => {
                   e.stopPropagation();
                   if (e.shiftKey) {
                     setMultiSel(prev => { const n = new Set(prev); n.has(node.id) ? n.delete(node.id) : n.add(node.id); return n; });
@@ -1234,15 +1890,15 @@ export default function App() {
                   <rect x={sx} y={sy} width={NW * scale} height={NH * scale} rx={5 * scale} fill={T.surface} stroke={isSel ? "#fff" : s.color} strokeWidth={isSel ? 1.6 : 0.8} strokeOpacity={isSel ? 1 : 0.4} />
                   <rect x={sx} y={sy + 5 * scale} width={2.5 * scale} height={(NH - 10) * scale} rx={1.2 * scale} fill={s.color} fillOpacity={0.6} />
                   <text x={sx + 14 * scale} y={sy + NH / 2 * scale} fontSize={12 * Math.max(scale, 0.55)} fill={s.color} textAnchor="middle" dominantBaseline="central">{s.icon}</text>
-                  <text x={sx + 26 * scale} y={sy + (node.data?.usage ? NH * 0.36 : NH / 2) * scale} fontSize={10.5 * Math.max(scale, 0.55)} fontWeight={600} fill={T.text} fontFamily="'IBM Plex Sans', sans-serif" dominantBaseline="central">
-                    {node.label.length > 18 ? node.label.slice(0, 18) + "…" : node.label}
+                  <text x={sx + (NW - 6) * scale} y={sy + (node.data?.usage ? NH * 0.36 : NH / 2) * scale} fontSize={10.5 * Math.max(scale, 0.55)} fontWeight={600} fill={T.text} fontFamily="'IBM Plex Sans', sans-serif" dominantBaseline="central" textAnchor="end">
+                    {(() => { const parts = node.label.split("/"); const last = parts[parts.length - 1].trim(); return last.length > 18 ? last.slice(0, 18) + "…" : last; })()}
                   </text>
                   {node.data?.usage && (
-                    <text x={sx + 26 * scale} y={sy + NH * 0.66 * scale} fontSize={7.5 * Math.max(scale, 0.55)} fill={T.textDim} fontFamily="'IBM Plex Mono', monospace" dominantBaseline="central">{node.data.usage}</text>
+                    <text x={sx + (NW - 6) * scale} y={sy + NH * 0.66 * scale} fontSize={7.5 * Math.max(scale, 0.55)} fill={T.textDim} fontFamily="'IBM Plex Mono', monospace" dominantBaseline="central" textAnchor="end">{node.data.usage}</text>
                   )}
                   {["l", "r", "t", "b"].map(side => { const p = nodePort(node, side); return <circle key={side} cx={p.x * scale + offset.x} cy={p.y * scale + offset.y} r={2.5 * scale} fill={T.surface} stroke={s.color} strokeWidth={1} strokeOpacity={0.3} />; })}
                   {/* Putaway button on location nodes */}
-                  {node.type === "location" && node.data?.usage === "internal" && (
+                  {node.type === "location" && (node.data?.usage === "internal" || node.data?.usage === "transit") && (
                     <g onClick={e => { e.stopPropagation(); setPutawayLoc(node.id); }} style={{ cursor: "pointer" }}>
                       <rect x={sx + (NW - 22) * scale} y={sy + 2 * scale} width={20 * scale} height={14 * scale} rx={3 * scale}
                         fill={paCount > 0 ? T.violetSoft : T.surfaceRaised} stroke={T.violet} strokeWidth={0.6} strokeOpacity={paCount > 0 ? 0.6 : 0.2} />
@@ -1297,7 +1953,7 @@ export default function App() {
         </div>
 
         {/* PROPERTY PANEL */}
-        {sel && !putawayLoc && <PropPanel sel={sel} data={data} onUpdate={doUpdate} onClose={() => setSel(null)} onDelete={doDelete} />}
+        {sel && !putawayLoc && <PropPanel sel={sel} data={data} onUpdate={doUpdate} onClose={() => setSel(null)} onDelete={doDelete} onSaveToOdoo={saveItemToOdoo} hasOdooSession={!!fetchedSnapshot} />}
 
         {/* PUTAWAY PANEL */}
         {putawayLoc && (() => {
@@ -1320,6 +1976,7 @@ export default function App() {
       {showCfg && <CfgModal cfg={apiCfg} onChange={setApiCfg} onClose={() => setShowCfg(false)} />}
       {showAdd && <AddModal onAdd={doAdd} routes={data.routes} onAddRule={addRuleToRoute} onClose={() => setShowAdd(false)} />}
       {showApi && <ApiPanel data={data} apiConfig={apiCfg} onClose={() => setShowApi(false)} />}
+      {showPushModal && <PushModal changes={showPushModal} onConfirm={executePush} onCancel={() => setShowPushModal(null)} />}
     </div>
   );
 }
