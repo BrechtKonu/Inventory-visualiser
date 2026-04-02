@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 
-// ─── THEME: Industrial blueprint ────────────────────────────────────────────
-const T = {
+// ─── THEMES ──────────────────────────────────────────────────────────────────
+const DARK_THEME = {
   bg: "#0a0e14",
   surface: "#111720",
   surfaceRaised: "#161d28",
@@ -23,6 +23,30 @@ const T = {
   violet: "#a78bfa",
   violetSoft: "rgba(167,139,250,0.10)",
 };
+const LIGHT_THEME = {
+  bg: "#f0f4f8",
+  surface: "#ffffff",
+  surfaceRaised: "#f8fafc",
+  surfaceHover: "#f1f5f9",
+  border: "#dde3ec",
+  borderLight: "#e8edf5",
+  text: "#1a2332",
+  textSoft: "#546578",
+  textDim: "#94a3b8",
+  accent: "#4b6ef5",
+  accentSoft: "rgba(75,110,245,0.12)",
+  green: "#059669",
+  greenSoft: "rgba(5,150,105,0.12)",
+  amber: "#d97706",
+  amberSoft: "rgba(217,119,6,0.10)",
+  rose: "#e11d48",
+  roseSoft: "rgba(225,29,72,0.10)",
+  sky: "#0284c7",
+  violet: "#7c3aed",
+  violetSoft: "rgba(124,58,237,0.10)",
+};
+// Mutable theme object — updated via Object.assign in App before each render
+const T = { ...DARK_THEME };
 
 const ROUTE_COLORS = [
   { stroke: "#6e8efb", fill: "rgba(110,142,251,0.06)" },
@@ -35,13 +59,22 @@ const ROUTE_COLORS = [
   { stroke: "#a3e635", fill: "rgba(163,230,53,0.06)" },
 ];
 
+// Mutable — refreshed from T in App before each render
 const nodeStyles = {
   warehouse: { color: T.accent, bg: T.accentSoft, icon: "⌂" },
   location: { color: T.green, bg: T.greenSoft, icon: "◎" },
   operation_type: { color: T.amber, bg: T.amberSoft, icon: "⛁" },
-  route: { color: T.sky, bg: "rgba(56,189,248,0.10)", icon: "⚡" },
+  route: { color: T.sky, bg: T.accentSoft, icon: "⚡" },
   putaway_rule: { color: T.violet, bg: T.violetSoft, icon: "⇲" },
 };
+function syncTheme(isDark) {
+  Object.assign(T, isDark ? DARK_THEME : LIGHT_THEME);
+  nodeStyles.warehouse.color = T.accent; nodeStyles.warehouse.bg = T.accentSoft;
+  nodeStyles.location.color = T.green;   nodeStyles.location.bg = T.greenSoft;
+  nodeStyles.operation_type.color = T.amber; nodeStyles.operation_type.bg = T.amberSoft;
+  nodeStyles.route.color = T.sky;        nodeStyles.route.bg = T.accentSoft;
+  nodeStyles.putaway_rule.color = T.violet; nodeStyles.putaway_rule.bg = T.violetSoft;
+}
 
 // ─── FIELD DEFINITIONS ──────────────────────────────────────────────────────
 const fieldDefs = {
@@ -318,38 +351,34 @@ const initData = () => ({
   ],
 });
 
-// ─── ROUTE OFFSET DETECTION (prevent bidirectional arrow overlap) ──────────
-function buildBidirectionalMap(routes) {
-  // Map rule pairs like "A→B" and "B→A" to apply curve offsets
-  const map = new Map(); // key: "A→B", value: { forward: ruleId, reverse: ruleId }
-  
-  routes.forEach(route => {
-    route.rules.forEach(rule => {
-      const key = `${rule.src_location_id}→${rule.dest_location_id}`;
-      const revKey = `${rule.dest_location_id}→${rule.src_location_id}`;
-      
-      if (map.has(revKey)) {
-        const existing = map.get(revKey);
-        existing.reverse = rule.id;
-        map.set(key, { forward: rule.id, reverse: null });
-      } else if (!map.has(key)) {
-        map.set(key, { forward: rule.id, reverse: null });
-      }
-    });
-  });
-  
-  return map;
-}
-
-function getCurveOffset(ruleId, routes, bidirMap, isBidirectional = false) {
-  // Returns +offset for one direction, -offset for reverse direction
-  if (!isBidirectional) return 0;
-  
-  for (const [_, pair] of bidirMap) {
-    if (pair.forward === ruleId) return -30;
-    if (pair.reverse === ruleId) return 30;
+// ─── ROUTE OFFSET DETECTION (fan out overlapping/bidirectional edges) ────────
+// Groups all rules by canonical node pair (sorted IDs) and assigns symmetric
+// offsets so overlapping edges spread out and bidirectional pairs go on
+// opposite sides of the node-pair line.
+function buildEdgeOffsetMap(routes) {
+  const SLOT = 30;
+  // Group rules by canonical pair key
+  const groups = new Map();
+  for (const route of routes) {
+    for (const rule of route.rules) {
+      const [a, b] = [rule.src_location_id, rule.dest_location_id].sort();
+      const key = `${a}\t${b}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ id: rule.id, isCanonFwd: rule.src_location_id === a });
+    }
   }
-  return 0;
+  // Assign bPath curveOffset for each rule.
+  // bPath's perpendicular is +canonical_perp for forward edges and -canonical_perp for reverse.
+  // To place edge at +k * canonical_perp: use curveOffset = isCanonFwd ? k : -k.
+  const result = new Map();
+  for (const [, edges] of groups) {
+    const n = edges.length;
+    edges.forEach((e, i) => {
+      const desiredCanonOffset = n === 1 ? 0 : (i - (n - 1) / 2) * SLOT;
+      result.set(e.id, e.isCanonFwd ? desiredCanonOffset : -desiredCanonOffset);
+    });
+  }
+  return result;
 }
 
 // ─── PUTAWAY RULES PANEL ────────────────────────────────────────────────────
@@ -636,6 +665,8 @@ const AddModal = ({ onAdd, routes, onAddRule, onClose }) => {
 // MAIN APP
 // ═════════════════════════════════════════════════════════════════════════════
 export default function App() {
+  const [isDark, setIsDark] = useState(true);
+  syncTheme(isDark); // keep T & nodeStyles in sync before every render
   const [data, setData] = useState(initData);
   const [scale, setScale] = useState(0.72);
   const [offset, setOffset] = useState({ x: 240, y: 30 });
@@ -651,18 +682,43 @@ export default function App() {
   const [showApi, setShowApi] = useState(false);
   const [apiCfg, setApiCfg] = useState({ url: "", db: "", username: "", apiKey: "" });
   const [putawayLoc, setPutawayLoc] = useState(null); // locationId to show putaway panel for
+  const [routeFilter, setRouteFilter] = useState("");
+  const [multiSel, setMultiSel] = useState(new Set());
+  const [showTips, setShowTips] = useState(false);
   const svgRef = useRef(null);
+  const historyRef = useRef([]);
+  const futureRef = useRef([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   // Putaway rule handlers
   const putawayUpdate = useCallback((ruleId, upd) => {
-    setData(p => ({ ...p, putawayRules: p.putawayRules.map(r => r.id === ruleId ? { ...r, ...upd } : r) }));
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+      return { ...p, putawayRules: p.putawayRules.map(r => r.id === ruleId ? { ...r, ...upd } : r) };
+    });
   }, []);
   const putawayAdd = useCallback((locId) => {
     const ts = Date.now();
-    setData(p => ({ ...p, putawayRules: [...p.putawayRules, { id: `pa-${ts}`, location_in_id: locId, location_out: "", product: "", category: "", sequence: 99 }] }));
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+      return { ...p, putawayRules: [...p.putawayRules, { id: `pa-${ts}`, location_in_id: locId, location_out: "", product: "", category: "", sequence: 99 }] };
+    });
   }, []);
   const putawayDelete = useCallback((ruleId) => {
-    setData(p => ({ ...p, putawayRules: p.putawayRules.filter(r => r.id !== ruleId) }));
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+      return { ...p, putawayRules: p.putawayRules.filter(r => r.id !== ruleId) };
+    });
   }, []);
 
   const doSelect = useCallback((id) => {
@@ -683,6 +739,10 @@ export default function App() {
 
   const doUpdate = useCallback((type, id, upd) => {
     setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
       const n = { ...p };
       if (["warehouse", "location", "putaway_rule"].includes(type)) {
         n.nodes = p.nodes.map(x => x.id === id ? { ...x, ...upd } : x);
@@ -706,6 +766,10 @@ export default function App() {
 
   const doDelete = useCallback((type, id) => {
     setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
       const n = { ...p };
       if (["warehouse", "location", "putaway_rule"].includes(type)) n.nodes = p.nodes.filter(x => x.id !== id);
       else if (type === "operation_type") n.operationTypes = p.operationTypes.filter(x => x.id !== id);
@@ -719,6 +783,10 @@ export default function App() {
   const doAdd = useCallback((type) => {
     const cx = (-offset.x + 500) / scale, cy = (-offset.y + 300) / scale, ts = Date.now();
     setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
       const n = { ...p };
       if (["location", "warehouse", "putaway_rule"].includes(type)) {
         const defs = {};
@@ -738,6 +806,10 @@ export default function App() {
   const addRuleToRoute = useCallback((routeId) => {
     const ts = Date.now();
     setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
       const locs = p.nodes.filter(x => x.type === "location");
       const newRule = {
         id: `rule-${ts}`, label: "New Rule", action: "pull", procure_method: "make_to_stock",
@@ -753,26 +825,187 @@ export default function App() {
     setTimeout(() => doSelect(`rule-${ts}`), 20);
   }, [doSelect]);
 
+  const undo = useCallback(() => {
+    setData(p => {
+      if (historyRef.current.length === 0) return p;
+      const prev = historyRef.current[historyRef.current.length - 1];
+      historyRef.current = historyRef.current.slice(0, -1);
+      futureRef.current = [p, ...futureRef.current.slice(0, 49)];
+      setCanUndo(historyRef.current.length > 0);
+      setCanRedo(true);
+      return prev;
+    });
+    setSel(null);
+  }, []);
+
+  const redo = useCallback(() => {
+    setData(p => {
+      if (futureRef.current.length === 0) return p;
+      const next = futureRef.current[0];
+      futureRef.current = futureRef.current.slice(1);
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      setCanUndo(true);
+      setCanRedo(futureRef.current.length > 0);
+      return next;
+    });
+    setSel(null);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') { e.preventDefault(); undo(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, redo]);
+
+  const autoLayout = useCallback(() => {
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+
+      const COL_W = 210, ROW_H = 80, PAD_X = 60;
+      const WH_Y   = 15;  // y for warehouse nodes (header row)
+      const PROD_Y = 80;  // y-start for production/transit top lane
+      const MAIN_Y = 170; // y-start for main flow (supplier→internal→customer)
+
+      const flowNodes = p.nodes.filter(n => n.type === "location");
+      const warehouseNodes = p.nodes.filter(n => n.type === "warehouse");
+      const nodeIds = new Set(flowNodes.map(n => n.id));
+
+      // Classify by usage
+      const usage = id => flowNodes.find(n => n.id === id)?.data?.usage || "";
+      const isSupplier  = id => usage(id) === "supplier";
+      const isCustomer  = id => usage(id) === "customer";
+      const isProd      = id => ["production"].includes(usage(id));
+      const isTransit   = id => usage(id) === "transit";
+
+      // Build unique directed edges (skip cross-supplier and cross-customer edges)
+      const edgeSet = new Set();
+      const addEdge = (s, d) => { if (nodeIds.has(s) && nodeIds.has(d) && s !== d) edgeSet.add(`${s}\t${d}`); };
+      for (const route of p.routes)
+        for (const rule of route.rules) addEdge(rule.src_location_id, rule.dest_location_id);
+      for (const op of p.operationTypes) addEdge(op.src_location_id, op.dest_location_id);
+      const edges = [...edgeSet].map(e => e.split('\t'));
+
+      // Build adjacency (ignore edges that would go FROM customer or TO supplier)
+      const adj = {};
+      for (const n of flowNodes) adj[n.id] = [];
+      for (const [s, d] of edges)
+        if (!isCustomer(s) && !isSupplier(d)) adj[s].push(d);
+
+      // Compute in-degrees for BFS (after adjacency pruning)
+      const inDeg = {};
+      for (const n of flowNodes) inDeg[n.id] = 0;
+      for (const [s, d] of edges)
+        if (!isCustomer(s) && !isSupplier(d) && nodeIds.has(d)) inDeg[d] = (inDeg[d] || 0) + 1;
+
+      // BFS longest-path: suppliers seed at tier 0
+      const depth = {};
+      const seeds = flowNodes.filter(n => isSupplier(n.id) || inDeg[n.id] === 0);
+      const queue = seeds.map(n => n.id);
+      for (const id of queue) depth[id] = isSupplier(id) ? 0 : 1;
+      for (let qi = 0; qi < queue.length && qi < 5000; qi++) {
+        const cur = queue[qi];
+        for (const next of adj[cur]) {
+          if (isCustomer(next)) continue; // customers assigned later
+          const nd = depth[cur] + 1;
+          if (depth[next] === undefined || depth[next] < nd) {
+            depth[next] = nd; queue.push(next);
+          }
+        }
+      }
+      for (const n of flowNodes) if (depth[n.id] === undefined) depth[n.id] = 1;
+
+      // Force customers to rightmost tier
+      const maxMainDepth = Math.max(0, ...flowNodes
+        .filter(n => !isCustomer(n.id))
+        .map(n => depth[n.id]));
+      for (const n of flowNodes) if (isCustomer(n.id)) depth[n.id] = maxMainDepth + 1;
+
+      // Separate nodes into lanes: production/transit at top, rest in main lane
+      const prodLane = {}, mainLane = {};
+      for (const n of flowNodes) {
+        const d = depth[n.id];
+        const lane = (isProd(n.id) || isTransit(n.id)) ? prodLane : mainLane;
+        if (!lane[d]) lane[d] = [];
+        lane[d].push(n.id);
+      }
+
+      // Build a unified column index across all tiers
+      const allTiers = [...new Set([
+        ...Object.keys(mainLane).map(Number),
+        ...Object.keys(prodLane).map(Number),
+      ])].sort((a, b) => a - b);
+      const tierCol = {};
+      allTiers.forEach((t, i) => { tierCol[t] = i; });
+
+      // Assign positions
+      const newPos = {};
+      for (const [tier, ids] of Object.entries(mainLane)) {
+        const ti = tierCol[Number(tier)];
+        ids.forEach((id, yi) => { newPos[id] = { x: PAD_X + ti * COL_W, y: MAIN_Y + yi * ROW_H }; });
+      }
+      for (const [tier, ids] of Object.entries(prodLane)) {
+        const ti = tierCol[Number(tier)];
+        ids.forEach((id, yi) => { newPos[id] = { x: PAD_X + ti * COL_W, y: PROD_Y + yi * ROW_H }; });
+      }
+
+      // Warehouses: top-left header row
+      warehouseNodes.forEach((n, i) => { newPos[n.id] = { x: PAD_X + i * COL_W, y: WH_Y }; });
+
+      return { ...p, nodes: p.nodes.map(n => newPos[n.id] ? { ...n, ...newPos[n.id] } : n) };
+    });
+  }, []);
+
+  const fitToContent = useCallback(() => {
+    if (!svgRef.current || data.nodes.length === 0) return;
+    const PAD = 40;
+    const minX = Math.min(...data.nodes.map(n => n.x));
+    const minY = Math.min(...data.nodes.map(n => n.y));
+    const maxX = Math.max(...data.nodes.map(n => n.x + NW));
+    const maxY = Math.max(...data.nodes.map(n => n.y + NH));
+    const r = svgRef.current.getBoundingClientRect();
+    const vw = r.width, vh = r.height;
+    const contentW = maxX - minX, contentH = maxY - minY;
+    const ns = Math.min(Math.max((vw - PAD * 2) / contentW, 0.2), (vh - PAD * 2) / contentH, 3);
+    setScale(ns);
+    setOffset({ x: PAD - minX * ns, y: PAD - minY * ns });
+  }, [data.nodes]);
+
   // Pan/drag handlers
   const onCanvasDown = useCallback((e) => {
     if (e.target === svgRef.current || e.target.getAttribute("data-bg")) {
-      setIsPan(true); setPanSt({ x: e.clientX - offset.x, y: e.clientY - offset.y }); setSel(null);
+      setIsPan(true); setPanSt({ x: e.clientX - offset.x, y: e.clientY - offset.y }); setSel(null); setMultiSel(new Set());
     }
   }, [offset]);
 
-  const onDragStart = useCallback((id, e, type) => {
+  const onDragStart = useCallback((id, e, type, isMulti) => {
     setDragId(id); setDragT(type);
     if (type === "node") {
-      const nd = data.nodes.find(n => n.id === id);
-      if (nd) setDragOff({ x: e.clientX - (nd.x * scale + offset.x), y: e.clientY - (nd.y * scale + offset.y) });
+      if (isMulti) {
+        setDragOff({ x: e.clientX, y: e.clientY });
+      } else {
+        const nd = data.nodes.find(n => n.id === id);
+        if (nd) setDragOff({ x: e.clientX - (nd.x * scale + offset.x), y: e.clientY - (nd.y * scale + offset.y) });
+      }
     } else { setDragOff({ x: e.clientX, y: e.clientY }); }
   }, [data.nodes, scale, offset]);
 
   const onMove = useCallback((e) => {
     if (isPan) setOffset({ x: e.clientX - panSt.x, y: e.clientY - panSt.y });
     if (dragId && dragT === "node") {
-      const nx = (e.clientX - dragOff.x - offset.x) / scale, ny = (e.clientY - dragOff.y - offset.y) / scale;
-      setData(p => ({ ...p, nodes: p.nodes.map(n => n.id === dragId ? { ...n, x: nx, y: ny } : n) }));
+      if (multiSel.has(dragId) && multiSel.size > 1) {
+        const dx = (e.clientX - dragOff.x) / scale, dy = (e.clientY - dragOff.y) / scale;
+        setDragOff({ x: e.clientX, y: e.clientY });
+        setData(p => ({ ...p, nodes: p.nodes.map(n => multiSel.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n) }));
+      } else {
+        const nx = (e.clientX - dragOff.x - offset.x) / scale, ny = (e.clientY - dragOff.y - offset.y) / scale;
+        setData(p => ({ ...p, nodes: p.nodes.map(n => n.id === dragId ? { ...n, x: nx, y: ny } : n) }));
+      }
     }
     if (dragId && dragT === "group") {
       const dx = (e.clientX - dragOff.x) / scale, dy = (e.clientY - dragOff.y) / scale;
@@ -784,7 +1017,7 @@ export default function App() {
         return { ...p, nodes: p.nodes.map(n => ids.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n) };
       });
     }
-  }, [isPan, panSt, dragId, dragT, dragOff, offset, scale]);
+  }, [isPan, panSt, dragId, dragT, dragOff, offset, scale, multiSel]);
 
   const onUp = useCallback(() => { setIsPan(false); setDragId(null); setDragT(null); }, []);
 
@@ -817,8 +1050,14 @@ export default function App() {
           <Btn small icon="add" onClick={() => setShowAdd(true)}>Add</Btn>
           <Btn small icon="api" onClick={() => setShowApi(true)}>API</Btn>
           <Btn small icon="settings" onClick={() => setShowCfg(true)} />
+          <Btn small variant="ghost" onClick={autoLayout} title="Auto-layout nodes">⊞</Btn>
+          <Btn small variant="ghost" onClick={() => setIsDark(d => !d)} title={isDark ? "Switch to light mode" : "Switch to dark mode"}>{isDark ? "☀" : "☾"}</Btn>
           <div style={{ width: 1, height: 18, background: T.border, alignSelf: "center", margin: "0 2px" }} />
-          <Btn small variant="ghost" icon="fit" onClick={() => { setScale(0.72); setOffset({ x: 240, y: 30 }); }} />
+          <Btn small variant="ghost" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</Btn>
+          <Btn small variant="ghost" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">↪</Btn>
+          <Btn small variant="ghost" onClick={() => setShowTips(t => !t)} title="Canvas tips" style={showTips ? { background: T.accentSoft, color: T.accent } : {}}>?</Btn>
+          <div style={{ width: 1, height: 18, background: T.border, alignSelf: "center", margin: "0 2px" }} />
+          <Btn small variant="ghost" icon="fit" onClick={fitToContent} title="Fit all nodes in view" />
           <div style={{ padding: "3px 7px", background: T.surfaceRaised, borderRadius: 3, border: `1px solid ${T.border}`, fontSize: 9, color: T.textDim, display: "flex", alignItems: "center", fontFamily: "'IBM Plex Mono', monospace" }}>{Math.round(scale * 100)}%</div>
         </div>
       </div>
@@ -826,9 +1065,24 @@ export default function App() {
       <div style={{ flex: 1, position: "relative", display: "flex" }}>
         {/* ROUTE SIDEBAR */}
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 210, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}`, fontSize: 11, fontWeight: 700, color: T.text }}>Routes & Rules</div>
+          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: 7 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Routes & Rules</span>
+            <input
+              type="text"
+              placeholder="Filter…"
+              value={routeFilter}
+              onChange={e => setRouteFilter(e.target.value)}
+              style={{ width: "100%", padding: "5px 8px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 10, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+            />
+          </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
-            {data.routes.map(route => {
+            {(() => {
+              const q = routeFilter.trim().toLowerCase();
+              const filtered = q
+                ? data.routes.map(r => ({ ...r, rules: r.rules.filter(rl => rl.label.toLowerCase().includes(q)) })).filter(r => r.label.toLowerCase().includes(q) || r.rules.length > 0)
+                : data.routes;
+              if (filtered.length === 0) return <div style={{ padding: "12px 14px", fontSize: 9, color: T.textDim }}>No matches</div>;
+              return filtered.map(route => {
               const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
               const h = hidden.has(route.id);
               return (
@@ -862,7 +1116,8 @@ export default function App() {
                   </>)}
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
           {/* Add route button at bottom */}
           <div style={{ padding: "8px 12px", borderTop: `1px solid ${T.border}` }}>
@@ -925,7 +1180,7 @@ export default function App() {
 
             {/* ROUTE RULE EDGES */}
             {(() => {
-              const bidirMap = buildBidirectionalMap(data.routes);
+              const edgeOffsets = buildEdgeOffsetMap(data.routes);
               return data.routes.map(route => {
                 if (hidden.has(route.id)) return null;
                 const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
@@ -936,13 +1191,7 @@ export default function App() {
                   const { sp, dp, ss, ds } = bestPorts(sn, dn);
                   const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
                   const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
-                  
-                  // Check if this rule has a bidirectional counterpart
-                  const key = `${rule.src_location_id}→${rule.dest_location_id}`;
-                  const revKey = `${rule.dest_location_id}→${rule.src_location_id}`;
-                  const isBidirectional = bidirMap.has(revKey) && bidirMap.get(revKey).reverse !== null;
-                  const curveOff = getCurveOffset(rule.id, data.routes, bidirMap, isBidirectional);
-                  
+                  const curveOff = edgeOffsets.get(rule.id) ?? 0;
                   const d = bPath(p1, p2, ss, ds, curveOff);
                   const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 - 10 };
                   const isSel = sel?.id === rule.id;
@@ -966,9 +1215,22 @@ export default function App() {
               const s = nodeStyles[node.type] || nodeStyles.location;
               const sx = node.x * scale + offset.x, sy = node.y * scale + offset.y;
               const isSel = sel?.id === node.id;
+              const isMultiSel = multiSel.has(node.id);
               const paCount = node.type === "location" ? data.putawayRules.filter(r => r.location_in_id === node.id).length : 0;
               return (
-                <g key={node.id} onMouseDown={e => { e.stopPropagation(); doSelect(node.id); onDragStart(node.id, e, "node"); }} style={{ cursor: "grab" }}>
+                <g key={node.id} onMouseDown={e => {
+                  e.stopPropagation();
+                  if (e.shiftKey) {
+                    setMultiSel(prev => { const n = new Set(prev); n.has(node.id) ? n.delete(node.id) : n.add(node.id); return n; });
+                  } else {
+                    const isMultiDrag = multiSel.has(node.id) && multiSel.size > 1;
+                    if (!isMultiDrag) setMultiSel(new Set());
+                    doSelect(node.id);
+                    onDragStart(node.id, e, "node", isMultiDrag);
+                  }
+                }} style={{ cursor: "grab" }}>
+                  <title>{node.label}</title>
+                  {isMultiSel && <rect x={sx - 3 * scale} y={sy - 3 * scale} width={(NW + 6) * scale} height={(NH + 6) * scale} rx={7 * scale} fill="none" stroke={T.accent} strokeWidth={1.5} strokeDasharray={`${4 * scale} ${3 * scale}`} />}
                   <rect x={sx} y={sy} width={NW * scale} height={NH * scale} rx={5 * scale} fill={T.surface} stroke={isSel ? "#fff" : s.color} strokeWidth={isSel ? 1.6 : 0.8} strokeOpacity={isSel ? 1 : 0.4} />
                   <rect x={sx} y={sy + 5 * scale} width={2.5 * scale} height={(NH - 10) * scale} rx={1.2 * scale} fill={s.color} fillOpacity={0.6} />
                   <text x={sx + 14 * scale} y={sy + NH / 2 * scale} fontSize={12 * Math.max(scale, 0.55)} fill={s.color} textAnchor="middle" dominantBaseline="central">{s.icon}</text>
@@ -993,6 +1255,31 @@ export default function App() {
               );
             })}
           </svg>
+
+          {/* TIPS PANEL */}
+          {showTips && (
+            <div style={{ position: "absolute", bottom: 38, right: 8, zIndex: 30, background: `${T.surface}f4`, border: `1px solid ${T.border}`, borderRadius: 8, padding: "12px 14px", width: 240, backdropFilter: "blur(8px)", boxShadow: "0 4px 16px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.text, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                Canvas controls
+                <button onClick={() => setShowTips(false)} style={{ background: "none", border: "none", cursor: "pointer", color: T.textDim, fontSize: 13, padding: 0, lineHeight: 1 }}>✕</button>
+              </div>
+              {[
+                ["Scroll wheel", "Zoom in / out"],
+                ["Click + drag canvas", "Pan"],
+                ["Drag node", "Move node"],
+                ["Shift + click nodes", "Multi-select"],
+                ["Drag any selected node", "Move selection"],
+                ["Ctrl+Z / Ctrl+Y", "Undo / Redo"],
+                ["⊞ button", "Auto-layout nodes"],
+                ["Fit button", "Fit all nodes in view"],
+              ].map(([key, desc]) => (
+                <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, marginBottom: 5 }}>
+                  <span style={{ fontSize: 9, fontFamily: "'IBM Plex Mono', monospace", color: T.accent, background: T.accentSoft, padding: "2px 5px", borderRadius: 3, whiteSpace: "nowrap" }}>{key}</span>
+                  <span style={{ fontSize: 9, color: T.textSoft, textAlign: "right" }}>{desc}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* LEGEND */}
           <div style={{ position: "absolute", bottom: 8, right: (sel && !putawayLoc) ? 340 : putawayLoc ? 410 : 8, padding: "6px 10px", background: `${T.surface}dd`, border: `1px solid ${T.border}`, borderRadius: 5, zIndex: 20, display: "flex", gap: 10, fontSize: 8, color: T.textSoft, fontFamily: "'IBM Plex Mono', monospace", transition: "right 0.2s" }}>
