@@ -880,15 +880,35 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
               </select>
             );
           } else if (f.type === "m2o") {
-            const opts = f.source === "location" ? data.nodes.filter(n => n.type === "location")
+            let opts = f.source === "location" ? data.nodes.filter(n => n.type === "location")
               : f.source === "warehouse" ? data.nodes.filter(n => n.type === "warehouse")
               : f.source === "operation_type" ? data.operationTypes
               : f.source === "route" ? data.routes
               : [];
+            // Self-reference safety: a location/warehouse/route can't be its own parent.
+            opts = opts.filter(o => o.id !== id);
+            // For location parent (location_id), sort view-type locations first
+            // (canonical Odoo container), then everything else alphabetically.
+            const isParentLocField = f.source === "location" && f.key === "location_id";
+            if (isParentLocField) {
+              opts = [...opts].sort((a, b) => {
+                const av = a.data?.usage === "view" ? 0 : 1;
+                const bv = b.data?.usage === "view" ? 0 : 1;
+                return av - bv || (a.label || "").localeCompare(b.label || "");
+              });
+            }
+            const labelOf = o => {
+              if (f.source === "location") {
+                const u = o.data?.usage || "internal";
+                const tag = u === "view" ? "▢ view" : u;
+                return `${o.label}  ·  ${tag}`;
+              }
+              return o.label;
+            };
             input = (
               <select value={val ?? ""} onChange={e => setVal(e.target.value)} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
                 <option value="">—</option>
-                {opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                {opts.map(o => <option key={o.id} value={o.id}>{labelOf(o)}</option>)}
               </select>
             );
           } else if (f.type === "m2m") {
