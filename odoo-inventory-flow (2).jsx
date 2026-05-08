@@ -2577,7 +2577,7 @@ export default function App() {
       const COL_W = 290;          // horizontal tier spacing
       const ROW_H = 100;          // vertical row spacing within a tier
       const DIAG_DROP = 55;       // vertical drift per tier (guarantees diagonal flow)
-      const PAD_X = 80, PAD_Y = 220; // canvas-edge padding
+      const PAD_X = 80;             // canvas-edge padding (Y baseline comes from Y_CENTER below)
       const BC_ITER = 12;         // barycenter passes (Sugiyama crossing reduction)
 
       // ── Visibility filter ────────────────────────────────────────────────
@@ -2600,6 +2600,82 @@ export default function App() {
       const isCustomer  = id => usage(id) === "customer";
       const isInventory = id => usage(id) === "inventory";
       const isView      = id => usage(id) === "view";
+
+      // ── Route lane assignment ────────────────────────────────────────────
+      // Each route gets a numeric laneRank. Negative = top, 0 = center axis,
+      // positive = bottom. Routes that start at a supplier sit on top, routes
+      // that end at a customer sit below center, manufacture goes far bottom,
+      // and "post-receive" bypass routes (those starting at a location that
+      // some other route fills from a supplier — like CrossDock starting at
+      // Input) sit between top and center.
+      //
+      // Chain-start of a route = sources that aren't also destinations in the
+      // same route's rule set. This handles routes-as-DAGs cleanly.
+      const ruleAct = rl => rl.data?.action || rl.action || "";
+      const suppliedLocs = new Set();
+      for (const r of p.routes) for (const rl of r.rules) {
+        if (isSupplier(rl.src_location_id)) suppliedLocs.add(rl.dest_location_id);
+      }
+      const routeStarts = route => {
+        const srcs = new Set(route.rules.map(r => r.src_location_id));
+        const dsts = new Set(route.rules.map(r => r.dest_location_id));
+        return [...srcs].filter(s => !dsts.has(s));
+      };
+      const laneRankForRoute = route => {
+        if (!route.rules.length) return 0;
+        const acts = route.rules.map(ruleAct);
+        if (acts.includes("manufacture")) return 100;
+        if (acts.includes("buy"))         return -90;
+        const starts = routeStarts(route);
+        const endsCust = route.rules.some(r => isCustomer(r.dest_location_id));
+        const startsSup = starts.some(isSupplier);
+        if (startsSup && endsCust)                       return -50;
+        if (startsSup)                                   return -100;
+        if (starts.some(s => suppliedLocs.has(s)))       return endsCust ? -30 : 0;
+        if (endsCust)                                    return 50;
+        return 0;
+      };
+      const routeLane = new Map(p.routes.map(r => [r.id, laneRankForRoute(r)]));
+
+      // ── Per-node lane resolution ─────────────────────────────────────────
+      // A node's lane = the lane of routes that touch it. If routes span
+      // multiple distinct lane buckets, the node sits on the center axis (0).
+      // Nodes touched by no route fall back to usage-derived defaults so
+      // op-only-driven layouts still group sensibly.
+      const lanesByNode = new Map();
+      for (const n of flowNodes) lanesByNode.set(n.id, new Set());
+      for (const route of p.routes) {
+        const lr = routeLane.get(route.id) ?? 0;
+        for (const rule of route.rules) {
+          if (lanesByNode.has(rule.src_location_id))  lanesByNode.get(rule.src_location_id).add(lr);
+          if (lanesByNode.has(rule.dest_location_id)) lanesByNode.get(rule.dest_location_id).add(lr);
+        }
+      }
+      const nodeLane = new Map();
+      for (const n of flowNodes) {
+        const ranks = [...lanesByNode.get(n.id)];
+        if (ranks.length === 0) {
+          const u = usage(n.id);
+          nodeLane.set(n.id,
+            u === "supplier"   ? -100 :
+            u === "customer"   ?   50 :
+            u === "production" ?  100 : 0);
+        } else if (ranks.length === 1) {
+          nodeLane.set(n.id, ranks[0]);
+        } else {
+          nodeLane.set(n.id, 0); // shared → center axis
+        }
+      }
+
+      // Distinct ranks → integer slots around 0 (center). Closest-to-zero
+      // ranks get slots ±1; farther ranks get ±2, etc. This keeps lane gap
+      // constant regardless of how dense the lane spectrum is.
+      const distinctRanks = [...new Set(nodeLane.values())];
+      const negRanks = distinctRanks.filter(r => r < 0).sort((a, b) => b - a);
+      const posRanks = distinctRanks.filter(r => r > 0).sort((a, b) => a - b);
+      const rankToSlot = new Map([[0, 0]]);
+      negRanks.forEach((r, i) => rankToSlot.set(r, -(i + 1)));
+      posRanks.forEach((r, i) => rankToSlot.set(r, (i + 1)));
 
       // ── Build directed edges (deduped, pointing in flow direction) ───────
       const edgeSet = new Set();
@@ -2713,49 +2789,57 @@ export default function App() {
         }
       }
 
-      // ── Position assignment ──────────────────────────────────────────────
-      // For each tier (left → right):
-      //   tier center y = blend( avg(predecessor y),  baseline + tier_index * DIAG_DROP )
-      // The DIAG_DROP component guarantees a real diagonal even on linear chains
-      // where every tier has just one incoming neighbor (avg-of-predecessor = predecessor.y
-      // and would otherwise leave all tiers at the same y).
-      // Within a tier, nodes get equal ROW_H spacing in barycenter-sorted order.
+      // ── Position assignment by lane ──────────────────────────────────────
+      // X = tier-based (unchanged). Y = lane-based: each lane has a global
+      // y-center; nodes in a lane stack symmetrically around that y.
+      //
+      // Linear-chain fallback: when every tier has exactly one node and all
+      // nodes share the center lane, lanes provide no vertical structure —
+      // fall back to the legacy diagonal drift so the chain doesn't collapse
+      // into a flat line.
+      const Y_CENTER = 400;
+      const LANE_GAP = 110;
+      const laneY = rank => Y_CENTER + (rankToSlot.get(rank) ?? 0) * LANE_GAP;
+      const isLinear = tiers.every(t => byTier.get(t).length === 1) &&
+                       [...nodeLane.values()].every(r => r === 0);
+
       const pos = {};
-      const baselineY = PAD_Y;
       for (let i = 0; i < tiers.length; i++) {
         const t = tiers[i];
         const ids = byTier.get(t);
-        const totalH = (ids.length - 1) * ROW_H;
-        const baseline = baselineY + i * DIAG_DROP;
-        let mid = baseline;
-        if (i > 0) {
-          const predYs = [];
-          for (const id of ids) for (const pred of adjB[id]) if (pos[pred]) predYs.push(pos[pred].y);
-          if (predYs.length) mid = avg(predYs) * 0.5 + baseline * 0.5; // blend predecessor pull with diagonal drift
-        }
         const x = PAD_X + (t - tiers[0]) * COL_W;
-        ids.forEach((id, j) => {
-          pos[id] = { x, y: mid - totalH / 2 + j * ROW_H };
-        });
+
+        if (isLinear) {
+          const baseline = Y_CENTER - 100 + i * DIAG_DROP;
+          ids.forEach((id, j) => { pos[id] = { x, y: baseline + j * ROW_H }; });
+          continue;
+        }
+
+        // Group by lane within this tier
+        const byLane = new Map();
+        for (const id of ids) {
+          const r = nodeLane.get(id) ?? 0;
+          if (!byLane.has(r)) byLane.set(r, []);
+          byLane.get(r).push(id);
+        }
+        // Stack each lane's nodes around the lane's y-center, sub-sorted by
+        // the barycenter-derived order in `ids` (which we preserve via push order).
+        for (const [rank, laneIds] of byLane.entries()) {
+          const ly = laneY(rank);
+          const m = laneIds.length;
+          laneIds.forEach((id, k) => {
+            pos[id] = { x, y: ly - (m - 1) * ROW_H / 2 + k * ROW_H };
+          });
+        }
       }
 
-      // ── Customer / supplier / inventory anchors ──────────────────────────
-      // The diagonal feel Brecht's manual layout achieves: vendors top-left,
-      // customers bottom-right. We bump the customer tier downward and the
-      // supplier tier slightly upward.
-      const internalYs = flowNodes
-        .filter(n => !isCustomer(n.id) && !isSupplier(n.id) && !isInventory(n.id))
-        .map(n => pos[n.id]?.y).filter(v => v !== undefined);
-      const yMin = internalYs.length ? Math.min(...internalYs) : 200;
-      const yMax = internalYs.length ? Math.max(...internalYs) : 600;
-      const range = Math.max(400, yMax - yMin);
-      // Multiple suppliers / customers share the same target y plus per-rank stagger.
-      const supList = flowNodes.filter(n => isSupplier(n.id));
-      supList.forEach((n, k) => { pos[n.id].y = yMin - 60 + k * ROW_H; });
-      const custList = flowNodes.filter(n => isCustomer(n.id));
-      custList.forEach((n, k) => { pos[n.id].y = yMax + 100 + k * ROW_H; });
+      // ── Inventory anchor ─────────────────────────────────────────────────
+      // Suppliers and customers already sit in their lane's y from the lane
+      // pass above. Inventory-loss locations are orthogonal to flow and pin
+      // to the bottom of the canvas regardless.
+      const yBottom = Math.max(Y_CENTER, ...flowNodes.map(n => pos[n.id]?.y ?? Y_CENTER));
       const invList = flowNodes.filter(n => isInventory(n.id));
-      invList.forEach((n, k) => { pos[n.id].y = yMax + 200 + k * ROW_H; });
+      invList.forEach((n, k) => { pos[n.id].y = yBottom + 200 + k * ROW_H; });
       // Last sanity: ensure no two nodes overlap (anywhere on the canvas, post-anchor)
       const positioned = [...nodeIds].map(id => ({ id, ...pos[id] }));
       const minGap = 90;
@@ -2818,9 +2902,19 @@ export default function App() {
       }
 
       const LW = 150, LH = 20, OFF = 20;
-      const newOps = p.operationTypes.map(op => {
+      // Place labels in tier-then-y order: ops in the leftmost / topmost
+      // dense areas get first pick of clean space, so later ops with more
+      // breathing room work around them. Cuts long leader lines.
+      const opTier = op => tier[op.src_location_id] ?? 999;
+      const opY    = op => newPos[op.src_location_id]?.y ?? 0;
+      const placementOrder = [...p.operationTypes].sort((a, b) => {
+        const dt = opTier(a) - opTier(b);
+        return dt !== 0 ? dt : opY(a) - opY(b);
+      });
+      const placedById = new Map();
+      for (const op of placementOrder) {
         const sn = newPos[op.src_location_id], dn = newPos[op.dest_location_id];
-        if (!sn || !dn) return op;
+        if (!sn || !dn) { placedById.set(op.id, op); continue; }
         const blob = {
           minX: Math.min(sn.x, dn.x) - 30,
           minY: Math.min(sn.y, dn.y) - 30,
@@ -2911,8 +3005,11 @@ export default function App() {
         const labelDx = Math.round(best.x - (blob.minX + 6));
         const labelDy = Math.round(best.y - (blob.minY - 14));
         opPositions.push({ id: op.id, blob, label: { x: best.x, y: best.y, w: LW, h: LH } });
-        return { ...op, labelDx, labelDy };
-      });
+        placedById.set(op.id, { ...op, labelDx, labelDy });
+      }
+      // Rebuild operationTypes in original array order so consumers (sidebar,
+      // export JSON, etc.) see a stable order independent of placement order.
+      const newOps = p.operationTypes.map(op => placedById.get(op.id) || op);
 
       return {
         ...p,
