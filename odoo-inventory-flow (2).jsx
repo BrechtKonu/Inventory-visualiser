@@ -1032,9 +1032,32 @@ const CfgModal = ({ cfg, onChange, onClose }) => {
 
 // ─── WAREHOUSE PRESET WIZARD ────────────────────────────────────────────
 const WizardModal = ({ existingNodes, onClose, onSkip, onCreate }) => {
-  // Field state — populated in Task 8
-  const [code, setCode] = useState("WH");
-  const [name, setName] = useState("Main Warehouse");
+  const ordinals = ['Main', 'Secondary', 'Tertiary', 'Quaternary', 'Quinary'];
+  const existingWarehouses = existingNodes.filter(n => n.type === 'warehouse');
+  const wCount = existingWarehouses.length;
+  const defaultCode = wCount === 0 ? 'WH' : `WH${wCount + 1}`;
+  const defaultName = wCount < ordinals.length
+    ? `${ordinals[wCount]} Warehouse`
+    : `Warehouse ${wCount + 1}`;
+
+  const [code, setCode] = useState(defaultCode);
+  const [name, setName] = useState(defaultName);
+  const [flags, setFlags] = useState({
+    reception_steps: 'one_step',
+    delivery_steps:  'ship_only',
+    manufacture_to_resupply: false,
+    manufacture_steps: 'mrp_one_step',
+    buy_to_resupply: true,
+    resupply_wh_ids: [],
+  });
+
+  const preview = useMemo(() => {
+    const ephemeralId = `wh-${Math.random().toString(36).slice(2, 8)}`;
+    return presetGenerator({
+      warehouseId: ephemeralId, warehouseCode: code, warehouseName: name,
+      flags, existingNodes,
+    });
+  }, [code, name, flags, existingNodes]);
 
   return (
     <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onClose}>
@@ -1045,11 +1068,109 @@ const WizardModal = ({ existingNodes, onClose, onSkip, onCreate }) => {
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 8 }}>Identity</div>
-            <div style={{ fontSize: 11, color: T.textDim }}>Form fields land in Task 8</div>
+            <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 8, fontWeight: 600 }}>Identity</div>
+            <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 8, marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: T.textDim, alignSelf: "center" }}>Code</label>
+              <input value={code} onChange={e => setCode(e.target.value)}
+                style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 12, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }}
+                maxLength={5} />
+              <label style={{ fontSize: 11, color: T.textDim, alignSelf: "center" }}>Name</label>
+              <input value={name} onChange={e => setName(e.target.value)}
+                style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 12, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }} />
+            </div>
+
+            <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 8, fontWeight: 600 }}>Routings</div>
+            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, marginBottom: 16 }}>
+              <label style={{ fontSize: 11, color: T.textDim, alignSelf: "center" }}>Reception</label>
+              <select value={flags.reception_steps} onChange={e => setFlags(f => ({ ...f, reception_steps: e.target.value }))}
+                style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 12, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }}>
+                <option value="one_step">Receive directly (1 step)</option>
+                <option value="two_steps">Input → Stock (2 steps)</option>
+                <option value="three_steps">Input → QC → Stock (3 steps)</option>
+              </select>
+              <label style={{ fontSize: 11, color: T.textDim, alignSelf: "center" }}>Delivery</label>
+              <select value={flags.delivery_steps} onChange={e => setFlags(f => ({ ...f, delivery_steps: e.target.value }))}
+                style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 12, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }}>
+                <option value="ship_only">Deliver directly (1 step)</option>
+                <option value="pick_ship">Pick → Ship (2 steps)</option>
+                <option value="pick_pack_ship">Pick → Pack → Ship (3 steps)</option>
+              </select>
+            </div>
+
+            <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 8, fontWeight: 600 }}>Resupply</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text, marginBottom: 8 }}>
+              <input type="checkbox" checked={flags.buy_to_resupply}
+                onChange={e => setFlags(f => ({ ...f, buy_to_resupply: e.target.checked }))} />
+              Buy to resupply
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text, marginBottom: 8 }}>
+              <input type="checkbox" checked={flags.manufacture_to_resupply}
+                onChange={e => setFlags(f => ({ ...f, manufacture_to_resupply: e.target.checked }))} />
+              Manufacture to resupply
+            </label>
+            {flags.manufacture_to_resupply && (
+              <div style={{ marginLeft: 22, marginBottom: 8 }}>
+                <select value={flags.manufacture_steps}
+                  onChange={e => setFlags(f => ({ ...f, manufacture_steps: e.target.value }))}
+                  style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 12, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }}>
+                  <option value="mrp_one_step">Manufacture (1 step)</option>
+                  <option value="pbm">Pick + Manufacture (2 steps)</option>
+                  <option value="pbm_sam">Pick + Manufacture + Store (3 steps)</option>
+                </select>
+              </div>
+            )}
+
+            {existingWarehouses.length > 0 && (
+              <div style={{ marginTop: 4 }}>
+                <label style={{ fontSize: 11, color: T.textDim, marginBottom: 6, display: "block" }}>
+                  Resupply from
+                </label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {existingWarehouses.map(wh => {
+                    const selected = flags.resupply_wh_ids.includes(wh.id);
+                    return (
+                      <button key={wh.id} type="button"
+                        onClick={() => setFlags(f => ({
+                          ...f,
+                          resupply_wh_ids: selected
+                            ? f.resupply_wh_ids.filter(id => id !== wh.id)
+                            : [...f.resupply_wh_ids, wh.id],
+                        }))}
+                        style={{
+                          padding: "4px 10px", borderRadius: 12, border: `1px solid ${T.border}`,
+                          background: selected ? T.accentSoft : "transparent",
+                          color: selected ? T.accent : T.textDim,
+                          fontSize: 11, fontFamily: "inherit", cursor: "pointer",
+                        }}>
+                        {selected ? "✓ " : ""}{wh.data?.code || wh.label} ({wh.label})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
-          <div style={{ background: T.surfaceHover, borderRadius: 6, padding: 12, fontSize: 11, color: T.textDim }}>
-            Live preview lands in Task 10
+          <div style={{ background: T.surfaceHover, borderRadius: 6, padding: 12, fontSize: 11, color: T.text, overflow: "auto" }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Will create:</div>
+
+            <div style={{ marginBottom: 6, color: T.textDim }}>Locations ({preview.addNodes.filter(n => n.type === "location").length})</div>
+            {preview.addNodes.filter(n => n.type === "location").map(n => (
+              <div key={n.id} style={{ paddingLeft: 8, color: T.text, marginBottom: 2 }}>{n.label} <span style={{ color: T.textDim }}>({n.data.usage})</span></div>
+            ))}
+
+            <div style={{ marginTop: 10, marginBottom: 6, color: T.textDim }}>Operation types ({preview.addOperationTypes.length})</div>
+            {preview.addOperationTypes.map(o => (
+              <div key={o.id} style={{ paddingLeft: 8, color: T.text, marginBottom: 2 }}>{o.label} <span style={{ color: T.textDim }}>({o.code})</span></div>
+            ))}
+
+            <div style={{ marginTop: 10, marginBottom: 6, color: T.textDim }}>Routes ({preview.addRoutes.length})</div>
+            {preview.addRoutes.map(r => (
+              <div key={r.id} style={{ paddingLeft: 8, color: T.text, marginBottom: 2 }}>{r.label} <span style={{ color: T.textDim }}>({r.rules.length} rules)</span></div>
+            ))}
+
+            {preview.addNodes.length === 0 && preview.addOperationTypes.length === 0 && preview.addRoutes.length === 0 && (
+              <div style={{ color: T.textDim, fontStyle: "italic" }}>(empty — toggle some options)</div>
+            )}
           </div>
         </div>
         <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1058,7 +1179,16 @@ const WizardModal = ({ existingNodes, onClose, onSkip, onCreate }) => {
           </button>
           <div style={{ display: "flex", gap: 8 }}>
             <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
-            <Btn variant="primary" small disabled onClick={onCreate}>Create</Btn>
+            <Btn variant="primary" small onClick={() => {
+              if (!code.trim() || !name.trim()) return;
+              const warehouseId = `wh-${Math.random().toString(36).slice(2, 8)}`;
+              const codeTaken = existingNodes.some(n => n.type === 'warehouse' && (n.data?.code || '').toUpperCase() === code.trim().toUpperCase());
+              if (codeTaken) { alert(`Warehouse code "${code}" already in use`); return; }
+              onCreate({
+                warehouseId, warehouseCode: code.trim(), warehouseName: name.trim(),
+                flags, existingNodes,
+              });
+            }}>Create</Btn>
           </div>
         </div>
       </div>
@@ -3084,6 +3214,23 @@ export default function App() {
     }
   }, [hideUnused, autoLayout, fitToContent]);
 
+  const mergeWizardOutput = useCallback((input) => {
+    const out = presetGenerator(input);
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+      return {
+        ...p,
+        nodes: [...p.nodes, ...out.addNodes],
+        operationTypes: [...p.operationTypes, ...out.addOperationTypes],
+        routes: [...p.routes, ...out.addRoutes],
+      };
+    });
+    setTimeout(() => { autoLayout(); fitToContent(); }, 50);
+  }, [autoLayout, fitToContent]);
+
   const handleFetchFromOdoo = useCallback(async () => {
     if (!apiCfg.url || !apiCfg.db || !apiCfg.username || !apiCfg.apiKey) {
       setShowCfg(true); // prompt user to fill in credentials
@@ -4286,7 +4433,10 @@ export default function App() {
         existingNodes={data.nodes}
         onClose={() => setShowWizard(false)}
         onSkip={() => { setShowWizard(false); doAdd('warehouse'); }}
-        onCreate={() => { /* Task 11 */ }}
+        onCreate={(payload) => {
+          setShowWizard(false);
+          mergeWizardOutput(payload);
+        }}
       />}
       {showApi && <ApiPanel data={data} apiConfig={apiCfg} onClose={() => setShowApi(false)} />}
       {showPushModal && <PushModal changes={showPushModal} onConfirm={executePush} onCancel={() => setShowPushModal(null)} />}
