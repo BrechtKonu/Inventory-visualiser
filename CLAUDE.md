@@ -88,6 +88,18 @@ JSON files exported by the app have the shape:
 - **Rules** (`stock.rule`) — pull/push supply chain rules with `action`, `procure_method`, `auto`, `delay`, group propagation, etc.
 - **Putaway Rules** (`stock.putaway.rule`) — automatic storage allocation by product / category / package type / storage category; stored in `data.putawayRules` (separate from canvas nodes), managed through a per-location panel
 
+## Provenance tags (`__autoGen`)
+
+Entities created by the warehouse-preset wizard (`src/warehouse-presets.js`) carry an extra structural field:
+
+```
+__autoGen: { warehouseId, source }
+```
+
+`source ∈ { 'identity', 'reception_steps', 'delivery_steps', 'manufacture', 'buy', 'resupply:<wh_id>' }`. `identity` = the warehouse + its Stock + Vendors/Customers. The flag-driven sources tag everything generated from a specific configuration toggle. Round-trips through the JSON export. Used by future Plan B (shrink-detection on field edits) and Plan C ("Create in Odoo" reconciliation).
+
+Resupply tagging is two-sided: target-side entities (Transit, IN op-type, route) tag `warehouseId=<target>, source='resupply:<source>'`; the source-side OUT op-type tags `warehouseId=<source>, source='resupply:<target>'`. This lets shrink-detection find both sides via complementary queries.
+
 ## Konu Tools Odoo module (Option E)
 
 `addons/konu_tools/` is the **central deployment** of the visualiser. It lives
@@ -142,7 +154,7 @@ Remaining roadmap (deferred):
 
 These items must work in BOTH the standalone HTML and the Odoo-module bundle (the build already writes to both — keep it that way for everything below).
 
-- **Warehouse-creation presets (Odoo-parity wizard)** — when adding a new warehouse, surface the same option flags Odoo offers (`reception_steps` 1/2/3, `delivery_steps` 1/2/3, `manufacture_to_resupply`, `buy_to_resupply`, `resupply_wh_ids`, etc.) and auto-generate the resulting routes + rules + locations + operation types from the chosen combo. Mirrors Odoo's `_create_or_update_route` cascades on `stock.warehouse`.
+- ✅ **Warehouse-creation presets — Plan A (creation only)** — wizard for `Add → Warehouse` with reception_steps / delivery_steps / manufacture (incl. manufacture_steps) / buy_to_resupply / resupply_wh_ids flags. Pure-function generators in `src/warehouse-presets.js` cascade locations + op-types + routes + rules. Provenance via `__autoGen = { warehouseId, source }` round-trips through JSON export. Smart name/code defaults bundled here (same roadmap item 6). **Plan B (live regen on field edits, with shrink-detection dialog)** and **Plan C ("Create in Odoo" mode that pushes via the proxy and re-imports)** are still pending — separate plans in `docs/superpowers/specs/2026-05-08-warehouse-preset-wizard-design.md` describe them.
 - **Push-rule domain helper** — push rules in Odoo accept a domain that filters which products they apply to. Add a domain builder (free-text + presets). Preset examples to ship: "has a quality check route", "has stock in <location>", "product has tag X", "product category Y". Make these one-click "insert" suggestions, not just docs.
 - **Putaway-rule storage strategies** — Odoo putaway rules support `storage_strategy` values (`closest_location`, `least_packages`, `manual_no_strategy`) and `storage_category_id`. Currently the visualiser only models product/category/sequence. Extend the per-location panel to surface strategy and category fields.
 - **Storage categories + capacity + sub-location levels** — open question, needs a brainstorm session. User wants right-click on a location node → sub-location view (open a nested canvas?). Storage categories assignment, capacity numbers, multi-level location trees (`WH/Stock/Shelf A/Bin 1` is currently a string in putaway-rule output, not a real node graph). **Before coding this, run a long brainstorming pass** — user said "ask me a huge amount of questions step by step".
