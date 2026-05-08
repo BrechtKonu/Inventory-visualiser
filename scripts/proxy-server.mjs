@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Dinsdag BV. All rights reserved.
+// Proprietary — see LICENSE.
+
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";

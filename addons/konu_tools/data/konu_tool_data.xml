@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 Konu Consulting BV. All rights reserved. -->
+<odoo>
+    <data noupdate="1">
+
+        <record id="tool_inventory_visualiser" model="konu.tool">
+            <field name="name">Inventory Visualiser</field>
+            <field name="technical_name">visualiser</field>
+            <field name="sequence">10</field>
+            <field name="icon">⌂</field>
+            <field name="color">2</field>
+            <field name="description">Visual designer for Odoo inventory: warehouses, locations, operation types, routes, rules, putaway. Read &amp; write through to the customer instance via the connection's API key.</field>
+            <field name="url_template">/konu_tools/visualiser/{connection_id}</field>
+            <field name="requires_connection" eval="True"/>
+        </record>
+
+    </data>
+</odoo>

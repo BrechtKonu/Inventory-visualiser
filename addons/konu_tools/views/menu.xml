@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 Konu Consulting BV. All rights reserved. -->
+<odoo>
+    <menuitem id="menu_konu_tools_root"
+              name="Konu Tools"
+              web_icon="konu_tools,static/description/icon.png"
+              sequence="60"
+              groups="konu_tools.group_konu_tools_user"/>
+
+    <menuitem id="menu_konu_customer_connections"
+              name="Customer Connections"
+              parent="menu_konu_tools_root"
+              action="action_konu_customer_connection"
+              sequence="10"/>
+
+    <menuitem id="menu_konu_tools_config_root"
+              name="Configuration"
+              parent="menu_konu_tools_root"
+              sequence="90"
+              groups="konu_tools.group_konu_tools_admin"/>
+
+    <menuitem id="menu_konu_tool_catalog"
+              name="Tool Catalog"
+              parent="menu_konu_tools_config_root"
+              action="action_konu_tool"
+              sequence="10"/>
+
+    <menuitem id="menu_konu_tool_usage_log"
+              name="Usage Log"
+              parent="menu_konu_tools_config_root"
+              action="action_konu_tool_usage_log"
+              sequence="20"/>
+</odoo>

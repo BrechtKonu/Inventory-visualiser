@@ -9,13 +9,14 @@ A single-file React visual designer for Odoo inventory workflows. The main compo
 ## Commands
 
 ```bash
+npm install      # First-time setup
 npm run build    # Bundle to dist/odoo-inventory-flow.html via esbuild
 npm run proxy    # Start proxy server at http://localhost:4173 (required for live Odoo connection)
 ```
 
 The build produces a **single self-contained HTML file** with inlined, minified JS (IIFE format, ES2020 target) — no separate assets. The build script (`scripts/build-standalone.mjs`) uses esbuild's `write: false` mode and manually wraps the output in an HTML shell.
 
-To develop, either open `dist/odoo-inventory-flow.html` directly in a browser (offline/manual mode only) or run `npm run proxy` after building and open `http://localhost:4173`.
+**Dev loop:** there is no watch mode or dev server. Every code change requires `npm run build` before reloading the browser. To develop, either open `dist/odoo-inventory-flow.html` directly (offline/manual mode only) or run `npm run proxy` and open `http://localhost:4173`.
 
 There are no tests and no linter configured.
 
@@ -25,23 +26,38 @@ Everything lives in `odoo-inventory-flow (2).jsx` with a single `export default 
 
 **Theme:** All colors defined in the `T` object at the top of the file (dark industrial blueprint palette). Route edge colors cycle through `ROUTE_COLORS` (8 entries), indexed by `colorIdx` on each route.
 
-**Central state (`data`):** Contains `nodes`, `operationTypes`, `routes`, and `putawayRules`. All updates go through `doUpdate(type, id, upd)`, `doDelete(type, id)`, and `doAdd(type)`. **State is not persisted** — it resets to `initData()` on every page load. The only persistence mechanism is the manual JSON export/import flow.
+**Central state (`data`):** Contains `nodes`, `operationTypes`, `routes`, and `putawayRules`. All updates go through `doUpdate(type, id, upd)`, `doDelete(type, id)`, and `doAdd(type)`. These helpers also push the previous state onto an undo stack (50-step Ctrl+Z/Ctrl+Y history) — bypass them and you break undo. **State is not persisted** — it resets to `initData()` on every page load. The only persistence mechanism is the manual JSON export/import flow.
 
 **`initData()`** defines the default sample data: a full 3-step receive / pick-pack-ship / manufacturing / crossdock warehouse scenario. It is the single source of truth for what appears on the canvas at startup.
 
-**Layout:** Three-panel layout — left sidebar (routes/rules tree, 210px), SVG canvas (pan/zoom/drag), right sidebar (property editor, 330px).
+**`TEMPLATES`** is a registry of starter scenarios (`buildBlank`, `buildReceive3`, `buildPPS`, `buildMTO`, `buildBuy`, `buildMfg`, `buildXDock`, plus `default = initData()`). Each entry has `{ id, name, description, icon, build }` and is exposed via the *From Template* path inside the Add modal. Applying a template overwrites `data` (with undo history pushed) and re-runs `autoLayout` + `fitToContent`.
+
+**Layout:** Three-panel — left sidebar (routes/rules tree, 230px), SVG canvas (pan/zoom/drag), right sidebar (property editor, 330px).
 
 **Canvas rendering order (SVG):**
 1. Dot-grid background pattern
 2. Arrow markers
-3. Operation type groups (dashed bounding boxes)
-4. Route rule edges (colored curved lines)
-5. Nodes with ports
-6. Legend
+3. Operation type groups (rounded blob with leader-line label callouts; AABB-overlap clustering avoids label collisions)
+4. Route rule edges (colored curved lines, sorted/offset by `buildEdgeOffsetMap`)
+5. Nodes with ports (rendered in `z` order — see Z-order)
+6. Minimap + Legend
 
-Node dimensions are fixed: `NW = 160, NH = 48`. Positions are stored as explicit `x`/`y` on each node — there is no auto-layout. The `bestPorts` function picks which side (left/right/top/bottom) to attach each edge to based on relative node positions. Bidirectional rule pairs (A→B and B→A) are detected by `buildBidirectionalMap` and offset with a perpendicular curve to prevent overlap.
+Node dimensions are fixed: `NW = 160, NH = 48`. Positions are stored as explicit `x`/`y` on each node — auto-layout via `autoLayout()` arranges into supplier→internal→customer tiers. `bestPorts` picks the closer side per edge and `buildEdgeOffsetMap` fans out parallel/bidirectional rules with perpendicular offsets.
 
-**Field definitions:** `fieldDefs` object maps each entity type to an array of `{ key, label, type, options? }` entries. `key` is the Odoo model field name; these drive both the property panel and the API code generation.
+**Edge visual encoding (`ACTION_META`):** Per `rule.action`:
+- `pull` → solid line with arrowhead
+- `push` → dashed line `5 3`
+- `pull_push` → dotted line `1 3`
+- `buy` → solid + `$` glyph at midpoint
+- `manufacture` → solid + `⚙` glyph at midpoint
+
+A small dot at t≈0.86 along each edge encodes the procurement method: filled = `make_to_order` / `mts_else_mto` (MTO), hollow = `make_to_stock` (MTS). Umbrella rules — where `rule.dest_location_id` differs from the picking type's `dest_location_id` — render with a wider semi-transparent halo behind the line, plus an `↳` prefix on the label and an "Umbrella Rule" callout in the PropPanel.
+
+**Z-order:** Each node and operation type carries an optional `z` integer (default 0). Render lists are sorted by `z` ascending. Helpers: `zReorder(dir)` with `dir ∈ {front, back, fwd, bwd}`. Toolbar buttons appear when something is selected; keyboard `[` / `]` cycle, `Ctrl+[` / `Ctrl+]` jump to back/front. Multi-select operations apply to all selected items.
+
+**Keyboard shortcuts:** `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A` select all, `Esc` clear, `Del`/`Backspace` delete, arrow keys nudge 8px (Shift = 1px), `F` focus selection, `[`/`]` and `Ctrl+[`/`Ctrl+]` z-order. The handler ignores keypresses while focus is in an input/textarea/select.
+
+**Field definitions:** `fieldDefs` object maps each entity type to an array of entries `{ key, label, type, options?, source?, hint? }`. Supported `type`s: `text`, `number`, `boolean`, `select` (with `options`), `m2o` / `m2m` (with `source: 'location'|'warehouse'|'route'|'operation_type'|...`), `ref` (free-text reference to an external Odoo record with `hint` describing the model), and `group` (section header; not an input). `key` is the Odoo model field name; these drive both the property panel and the API code generation. Coverage is aimed at Odoo 17/18/19 stock module fields.
 
 **API code generation:** Two Python xmlrpc templates (fetch/write tabs) generated dynamically from current `data` and rendered in a modal. Also supports live read/write via the proxy server using Odoo JSON-RPC (`/web/dataset/call_kw`).
 
@@ -65,9 +81,59 @@ JSON files exported by the app have the shape:
 
 ## Key Odoo Entity Types
 
-- **Warehouses** — top-level, configured with reception/delivery step counts
-- **Locations** — usage types: `supplier`, `internal`, `customer`, `production`, `transit`, `inventory`
-- **Operation Types** — groups of moves with source/destination locations; `code` is `incoming`/`outgoing`/`internal`
-- **Routes** — named collections of rules with applicability flags (product, category, warehouse, SO, PO)
-- **Rules** — pull/push supply chain rules with `action`, `procure_method`, and `auto` fields
-- **Putaway Rules** — automatic storage allocation by product or category; stored in `data.putawayRules` (separate from canvas nodes), managed through a per-location panel
+- **Warehouses** — top-level, configured with reception/delivery/manufacture step counts
+- **Locations** — usage types: `supplier`, `internal`, `customer`, `production`, `transit`, `inventory`, `view`. The Odoo `posx`/`posy`/`posz` fields are surfaced in the property panel for round-tripping but not used for layout (the canvas keeps its own `node.x` / `node.y`).
+- **Operation Types** (`stock.picking.type`) — groups of moves with source/destination locations; `code` is `incoming` / `outgoing` / `internal` / `mrp_operation`
+- **Routes** (`stock.route`) — named collections of rules with applicability flags (product, category, warehouse, packaging, SO)
+- **Rules** (`stock.rule`) — pull/push supply chain rules with `action`, `procure_method`, `auto`, `delay`, group propagation, etc.
+- **Putaway Rules** (`stock.putaway.rule`) — automatic storage allocation by product / category / package type / storage category; stored in `data.putawayRules` (separate from canvas nodes), managed through a per-location panel
+
+## Konu Tools Odoo module (Option E)
+
+`addons/konu_tools/` is the **central deployment** of the visualiser. It lives
+inside Konu's own Odoo, not the customer's. A `konu.customer.connection`
+record stores each customer's URL/DB/login and a Fernet-encrypted API key,
+tied to `res.partner` and optionally `project.project`. The Inventory
+Visualiser is the first entry in the `konu.tool` catalog.
+
+When a consultant clicks *Open Visualiser* on a connection, the controller
+(`controllers/main.py`) serves the bundled HTML at
+`/konu_tools/visualiser/<id>`, injecting `window.__KONU_CFG__` so the React
+app routes its RPCs back through `/konu_tools/rpc/<id>` — the controller
+forwards them server-side to the customer Odoo using the stored key.
+
+`scripts/build-standalone.mjs` writes the bundle to **both** locations:
+
+* `dist/odoo-inventory-flow.html` (standalone)
+* `addons/konu_tools/static/src/bundle/odoo-inventory-flow.html` (module)
+
+So `npm run build` covers both deployments — no separate `build:module`
+needed (the alias exists for clarity).
+
+The same connection registry is intended to back the `odoo-customer` MCP
+server (KOTASK-065 Phase 2). Connections with `mcp_exposed=True` are the
+ones the MCP includes in its slug list.
+
+`api_key_input` (form-only virtual Char, group-restricted) lets admins
+paste a new key; on save the model encrypts it via `set_api_key()` and
+discards the plain text. The Fernet master key reads from
+`KONU_TOOLS_FERNET_KEY` env var (preferred) or `ir.config_parameter`.
+
+## Roadmap (post-audit)
+
+Items 1–8 from the May 2026 audit are landed:
+1. ✅ Push/pull visual differentiation
+2. ✅ Field coverage + m2o/m2m widgets
+3. ✅ Op-type blobs + leader-line labels
+4. ✅ Z-order controls
+5. ✅ Mixed pull/push chain rendering (umbrella detection)
+6. ✅ Templates library
+7. ✅ UI polish (keyboard shortcuts, minimap)
+8. ⏭ Warehouse map tab — **dropped from scope** (audit-time idea; cost outweighed value once the rest landed). Posx/posy fields stay surfaced in the property panel for Odoo round-trip.
+9. ✅ Konu-side Odoo module (Option E): `addons/konu_tools` — connection registry, controller, RPC bridge, encrypted API keys, audit log, partner/project ties, MCP-ready
+
+Remaining roadmap (deferred):
+- **OWL client_action wrapper** — embed the visualiser in Odoo breadcrumb chrome instead of new tab. Small wrapper over an iframe with postMessage.
+- **MCP integration (KOTASK-065 Phase 2)** — point the `odoo-customer` MCP server at `konu.customer.connection` records (filter `mcp_exposed=True`).
+- **Customer-side fallback module (Option A)** — for security-conscious customers who refuse to share API keys. Same React bundle, mounted in a customer-side client_action with same-origin auth.
+- **API key rotation reminders** — `mail.activity` cron creating "rotate API key" follow-ups on connections with keys older than 6 months.

@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_konu_customer_connection_user,konu.customer.connection.user,model_konu_customer_connection,group_konu_tools_user,1,0,0,0
+access_konu_customer_connection_admin,konu.customer.connection.admin,model_konu_customer_connection,group_konu_tools_admin,1,1,1,1
+access_konu_tool_user,konu.tool.user,model_konu_tool,group_konu_tools_user,1,0,0,0
+access_konu_tool_admin,konu.tool.admin,model_konu_tool,group_konu_tools_admin,1,1,1,1
+access_konu_tool_usage_log_user,konu.tool.usage.log.user,model_konu_tool_usage_log,group_konu_tools_user,1,0,0,0
+access_konu_tool_usage_log_admin,konu.tool.usage.log.admin,model_konu_tool_usage_log,group_konu_tools_admin,1,1,1,1

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 Konu Consulting BV. All rights reserved. -->
+<odoo>
+    <data noupdate="0">
+
+        <record id="module_category_konu_tools" model="ir.module.category">
+            <field name="name">Konu Tools</field>
+            <field name="description">Internal Konu utilities — connection registry, visualiser, etc.</field>
+            <field name="sequence">30</field>
+        </record>
+
+        <record id="group_konu_tools_user" model="res.groups">
+            <field name="name">User</field>
+            <field name="category_id" ref="module_category_konu_tools"/>
+            <field name="comment">Use Konu tools and read connection records (no API key access).</field>
+        </record>
+
+        <record id="group_konu_tools_admin" model="res.groups">
+            <field name="name">Administrator</field>
+            <field name="category_id" ref="module_category_konu_tools"/>
+            <field name="implied_ids" eval="[(4, ref('group_konu_tools_user'))]"/>
+            <field name="users" eval="[(4, ref('base.user_admin'))]"/>
+            <field name="comment">Manage connections, set/clear API keys, edit tool catalog.</field>
+        </record>
+
+        <!-- Connection record rule: users see all active connections; admins see everything. -->
+        <record id="rule_konu_customer_connection_user" model="ir.rule">
+            <field name="name">Konu Connections: visible to konu_tools users</field>
+            <field name="model_id" ref="model_konu_customer_connection"/>
+            <field name="domain_force">[('active', '=', True)]</field>
+            <field name="groups" eval="[(4, ref('group_konu_tools_user'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <record id="rule_konu_customer_connection_admin" model="ir.rule">
+            <field name="name">Konu Connections: full access for admins</field>
+            <field name="model_id" ref="model_konu_customer_connection"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_konu_tools_admin'))]"/>
+        </record>
+
+    </data>
+</odoo>

@@ -1,0 +1,40 @@
+Copyright (c) 2026 Dinsdag BV. All rights reserved.
+
+Author: Brecht Soenen (moral rights retained pursuant to art. XI.165 §2
+of the Belgian Code of Economic Law).
+
+This software (the "Module") is proprietary to Dinsdag BV. All
+intellectual property rights remain exclusively with Dinsdag BV; no
+ownership transfer is granted by use, distribution, or possession of
+this Module.
+
+Use by Konu BV (KBO BE 0795.567.175) is governed by the
+Dinsdag BV ↔ Konu BV Module Use Agreement, which grants Konu a
+non-exclusive, non-transferable, royalty-free right to use the Module
+for its own internal operations and for deployment at Konu's Own
+Partners (end customers, subcontractors and related Konu entities) as
+part of Konu's consultancy and implementation services. Konu may not
+sublicense, resell, or make the Module available to other Odoo partners
+or third-party consultancy firms.
+
+Use by any third party (end customer, integrator, hosting provider, or
+Odoo partner) is governed by the Dinsdag BV End-User Licence Agreement
+(EULA), stacked on top of the Odoo Proprietary License v1.0 (OPL-1).
+Where the two conflict, the stricter provision in favour of Dinsdag BV
+applies. One licence covers one (1) Odoo database belonging to one (1)
+legal entity; redistribution, sublicensing, reverse engineering, and
+removal of copyright notices are prohibited.
+
+This Module is provided "as is", without warranty of any kind beyond
+what is set out in the applicable agreement. Dinsdag BV's liability is
+limited as provided in those agreements.
+
+Belgian law applies. The courts of the judicial district of Kortrijk
+have exclusive jurisdiction.
+
+Reference documents (controlling in case of conflict with this notice):
+  - Dinsdag BV ↔ Konu BV Module Use Agreement
+  - Dinsdag BV End-User Licence Agreement (EULA)
+  - Odoo Proprietary License v1.0 (OPL-1)
+
+For licensing enquiries, contact Dinsdag BV.

@@ -2,8 +2,12 @@
   "name": "odoo-inventory-flow-standalone",
   "private": true,
   "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Brecht Soenen <brecht@dinsdag.be> (Dinsdag BV)",
+  "copyright": "Copyright (c) 2026 Dinsdag BV. All rights reserved.",
   "scripts": {
     "build": "node scripts/build-standalone.mjs",
+    "build:module": "node scripts/build-standalone.mjs",
     "proxy": "node scripts/proxy-server.mjs"
   },
   "dependencies": {
