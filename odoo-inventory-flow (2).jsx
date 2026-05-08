@@ -2116,6 +2116,12 @@ export default function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
+  // Plan B: a deactivated entity has data.active === false AND
+  // __autoGen.deactivated === true. Used to dim/hide entities the user
+  // chose to keep but mark inactive instead of deleting.
+  const isDeactivated = useCallback((e) =>
+    e?.data?.active === false && e?.__autoGen?.deactivated === true, []);
+
   // Edge offsets for parallel/bidirectional rules — memoized so drag stays smooth
   const edgeOffsetMap = useMemo(() => buildEdgeOffsetMap(data.routes), [data.routes]);
 
@@ -3795,19 +3801,25 @@ export default function App() {
               onChange={e => setRouteFilter(e.target.value)}
               style={{ width: "100%", padding: "5px 8px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
             />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: T.textDim, cursor: "pointer" }}>
+              <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} style={{ accentColor: T.accent, width: 12, height: 12 }} />
+              Show inactive
+            </label>
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
             {(() => {
               const q = routeFilter.trim().toLowerCase();
+              const baseRoutes = showInactive ? data.routes : data.routes.filter(r => !isDeactivated(r));
               const filtered = q
-                ? data.routes.map(r => ({ ...r, rules: r.rules.filter(rl => rl.label.toLowerCase().includes(q)) })).filter(r => r.label.toLowerCase().includes(q) || r.rules.length > 0)
-                : data.routes;
+                ? baseRoutes.map(r => ({ ...r, rules: r.rules.filter(rl => rl.label.toLowerCase().includes(q)) })).filter(r => r.label.toLowerCase().includes(q) || r.rules.length > 0)
+                : baseRoutes;
               if (filtered.length === 0) return <div style={{ padding: "12px 14px", fontSize: 9, color: T.textDim }}>No matches</div>;
               return filtered.map(route => {
               const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
               const h = hidden.has(route.id);
+              const dim = isDeactivated(route);
               return (
-                <div key={route.id} style={{ marginBottom: 2 }}>
+                <div key={route.id} style={{ marginBottom: 2, opacity: dim ? 0.4 : 1 }}>
                   <div onClick={() => doSelect(route.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", cursor: "pointer" }}
                     onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     <div style={{ width: 8, height: 8, borderRadius: 2, background: rc.stroke, opacity: h ? 0.3 : 1, flexShrink: 0 }} />
@@ -4003,6 +4015,7 @@ export default function App() {
               const PAD = 30;
               const items = [];
               for (const op of data.operationTypes) {
+                if (isDeactivated(op) && !showInactive) continue;
                 const sn = data.nodes.find(n => n.id === op.src_location_id);
                 const dn = data.nodes.find(n => n.id === op.dest_location_id);
                 if (!sn || !dn) continue;
@@ -4095,9 +4108,10 @@ export default function App() {
                 const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
 
                 const dimOp = routeHighlight && !routeHighlight.nodeIds.has(op.src_location_id) && !routeHighlight.nodeIds.has(op.dest_location_id);
+                const opInactive = isDeactivated(op);
                 const hasManualLabel = (op.labelDx || 0) !== 0 || (op.labelDy || 0) !== 0;
                 return (
-                  <g key={op.id} opacity={dimOp ? 0.15 : 1}
+                  <g key={op.id} opacity={dimOp ? 0.15 : (opInactive ? 0.4 : 1)}
                      onContextMenu={e => openCtxMenu("operation_type", op.id, e)}
                      onMouseDown={e => { if (e.target.getAttribute("data-gbg")) { e.stopPropagation(); doSelect(op.id); onDragStart(op.id, e, "group"); } }}>
                     <title>{`${op.label}\n${op.code} · ${op.sequence_code || ""}`}</title>
@@ -4140,6 +4154,8 @@ export default function App() {
               const edgeOffsets = edgeOffsetMap;
               return data.routes.map(route => {
                 if (hidden.has(route.id)) return null;
+                const routeInactive = isDeactivated(route);
+                if (routeInactive && !showInactive) return null;
                 const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
                 return route.rules.map(rule => {
                   const sn = data.nodes.find(n => n.id === rule.src_location_id);
@@ -4164,7 +4180,7 @@ export default function App() {
                   const isUmbrella = !!(op && (op.dest_location_id !== rule.dest_location_id || op.src_location_id !== rule.src_location_id));
                   const tip = `${meta.label} · ${procure.replace(/_/g, "-")} · ${rule.data?.delay || 0}d · ${rule.data?.auto || rule.auto || "manual"}${isUmbrella ? `\nUmbrella → real picking ${op.src_location_id ? `${(data.nodes.find(n=>n.id===op.src_location_id)?.label||"?")} → ${(data.nodes.find(n=>n.id===op.dest_location_id)?.label||"?")}` : ""}` : ""}`;
                   return (
-                    <g key={rule.id} opacity={dimEdge ? 0.12 : 1} onClick={e => { e.stopPropagation(); doSelect(rule.id); }} style={{ cursor: "pointer" }}>
+                    <g key={rule.id} opacity={dimEdge ? 0.12 : (routeInactive ? 0.4 : 1)} onClick={e => { e.stopPropagation(); doSelect(rule.id); }} style={{ cursor: "pointer" }}>
                       <title>{`${rule.label}\n${tip}`}</title>
                       {/* Invisible wide hit-area path so the edge is easy to click */}
                       <path d={d} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
@@ -4199,11 +4215,13 @@ export default function App() {
             {/* NODES */}
             {[...data.nodes].sort((a, b) => (a.z || 0) - (b.z || 0)).map(node => {
               if (hideUnused && node.type === "location" && !usedLocationIds.has(node.id)) return null;
+              if (isDeactivated(node) && !showInactive) return null;
               // Warehouses with children render as a blob+name-tag layer above; hide the small rect.
               if (node.type === "warehouse" && (warehouseChildren.get(node.id)?.locations.length || 0) > 0) return null;
               // View locations with children also render as a blob; hide the leaf rect.
               if (node.type === "location" && node.data?.usage === "view" && (viewChildren.get(node.id)?.locations.length || 0) > 0) return null;
               const s = nodeVisual(node);
+              const nodeInactive = isDeactivated(node);
               const cornerR = s.shape === "pill" ? Math.min(NW, NH) / 2 : 9;
               const dashArr = dashFor(s.border, scale);
               const sx = node.x * scale + offset.x, sy = node.y * scale + offset.y;
@@ -4212,7 +4230,7 @@ export default function App() {
               const dimNode = routeHighlight && !routeHighlight.nodeIds.has(node.id);
               const paCount = node.type === "location" ? data.putawayRules.filter(r => r.location_in_id === node.id).length : 0;
               return (
-                <g key={node.id} opacity={dimNode ? 0.18 : 1}
+                <g key={node.id} opacity={dimNode ? 0.18 : (nodeInactive ? 0.4 : 1)}
                   onMouseEnter={() => setHoverId(node.id)}
                   onMouseLeave={() => setHoverId(h => h === node.id ? null : h)}
                   onMouseDown={e => {
