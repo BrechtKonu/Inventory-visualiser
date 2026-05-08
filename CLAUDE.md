@@ -149,6 +149,7 @@ Remaining roadmap (deferred):
 - **MCP integration (KOTASK-065 Phase 2)** — point the `odoo-customer` MCP server at `konu.customer.connection` records (filter `mcp_exposed=True`).
 - **Customer-side fallback module (Option A)** — for security-conscious customers who refuse to share API keys. Same React bundle, mounted in a customer-side client_action with same-origin auth.
 - **API key rotation reminders** — `mail.activity` cron creating "rotate API key" follow-ups on connections with keys older than 6 months.
+<<<<<<< HEAD
 
 ### Next-up scope (May 2026, captured from a single brain-dump session)
 
@@ -162,3 +163,6 @@ These items must work in BOTH the standalone HTML and the Odoo-module bundle (th
 - **Smart name/code suggestions on create** — when adding a new location, warehouse, op-type, etc., propose a short name + code from context (e.g. new internal location under `WH/Stock` → suggest `WH/Stock/Shelf X` or pick the next free letter). Same for `sequence_code` on op-types.
 - **Sequence numbers** — sequence-related fields (`sequence`, `sequence_code`, `code`, op-type `sequence_code`) are blank when importing from JSON or Odoo. Brainstorm: should they auto-fill on import? On render? Step-by-step Q&A before building.
 - **Miro export/import (nice-to-have)** — warehouses → Miro frames; locations → blocks; operation types → grouped blocks with leader-line callouts; rules → arrows; routes → colour groups. Possibly use Miro's REST API + board-export JSON. Flagged as a later phase.
+=======
+- 🟡 **Storage categories + capacity + sub-location levels** — **partial: storage_category_id + capacity surfaced on locations, badge shown on canvas**. Brainstorming still required for: nested-canvas sub-location view, capacity-based putaway algorithm, multi-level location trees (`WH/Stock/Shelf A/Bin 1` as real node graph vs string), storage-category capacity rules. **TODO: ask Brecht the long Q&A list before extending this further.**
+>>>>>>> f117da8 ([ADD] location capacity field + canvas badge for storage_category/capacity (minimal — full brainstorm pending))

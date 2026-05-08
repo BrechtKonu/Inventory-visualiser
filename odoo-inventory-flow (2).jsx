@@ -214,6 +214,7 @@ const fieldDefs = {
       { value: "fefo", label: "FEFO" },
     ]},
     { key: "storage_category_id", label: "Storage Category", type: "ref", hint: "stock.storage.category" },
+    { key: "capacity", label: "Capacity", type: "number", hint: "Storage capacity (units left to user — typically max # of products / packages)" },
     { key: "scrap_location", label: "Scrap Location", type: "boolean" },
     { key: "return_location", label: "Return Location", type: "boolean" },
     { key: "replenish_location", label: "Replenish Location", type: "boolean" },
@@ -4482,6 +4483,18 @@ export default function App() {
                         ⇲{paCount > 0 ? paCount : ""}
                       </text>
                     </g>
+                  )}
+                  {/* TODO(brainstorm-needed): minimal storage-category surface added 2026-05-09.
+                      Nested sub-location view, capacity-based putaway, and multi-level trees
+                      are deferred pending a brainstorm pass with Brecht. See CLAUDE.md. */}
+                  {node.type === "location" && node.data?.usage === "internal" && (node.data?.capacity || node.data?.storage_category_id) && (
+                    <text x={sx + (NW / 2) * scale} y={sy + (NH + 11) * scale}
+                      fontSize={9 * Math.max(scale, 0.6)} fill={T.textDim} textAnchor="middle"
+                      fontFamily="'IBM Plex Mono', monospace" pointerEvents="none" style={{ userSelect: "none" }}>
+                      {node.data?.storage_category_id ? `${node.data.storage_category_id}` : ''}
+                      {node.data?.storage_category_id && node.data?.capacity ? ' · ' : ''}
+                      {node.data?.capacity ? `cap ${node.data.capacity}` : ''}
+                    </text>
                   )}
                 </g>
               );
