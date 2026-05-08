@@ -42,40 +42,49 @@ const ctx = (overrides = {}) => ({
 });
 
 it('reception_steps=one_step adds Receipts op-type, no Input/QC, no route', () => {
-  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'one_step', delivery_steps: '' } }));
-  assert.equal(r.addNodes.length, 0, 'no new locations');
-  assert.equal(r.addOperationTypes.length, 1, 'one op-type (Receipts)');
-  assert.equal(r.addOperationTypes[0].label, 'Receipts');
-  assert.equal(r.addOperationTypes[0].src_location_id, 'loc-vendors');
-  assert.equal(r.addOperationTypes[0].dest_location_id, 'wh1-stock');
-  assert.equal(r.addOperationTypes[0].__autoGen.source, 'reception_steps');
-  assert.equal(r.addRoutes.length, 0, 'no route for 1-step (op-type alone is enough)');
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'one_step' } }));
+  const recvNodes  = r.addNodes.filter(n => n.__autoGen?.source === 'reception_steps');
+  const recvOps    = r.addOperationTypes.filter(o => o.__autoGen?.source === 'reception_steps');
+  const recvRoutes = r.addRoutes.filter(rt => rt.__autoGen?.source === 'reception_steps');
+  assert.equal(recvNodes.length, 0, 'no new locations');
+  assert.equal(recvOps.length, 1, 'one op-type (Receipts)');
+  assert.equal(recvOps[0].label, 'Receipts');
+  assert.equal(recvOps[0].src_location_id, 'loc-vendors');
+  assert.equal(recvOps[0].dest_location_id, 'wh1-stock');
+  assert.equal(recvOps[0].__autoGen.source, 'reception_steps');
+  assert.equal(recvRoutes.length, 0, 'no route for 1-step (op-type alone is enough)');
 });
 
 it('reception_steps=two_steps adds Input + 2 op-types + 1 route w/ 2 rules', () => {
-  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'two_steps', delivery_steps: '' } }));
-  assert.equal(r.addNodes.length, 1);
-  assert.equal(r.addNodes[0].label, 'WH/Input');
-  assert.equal(r.addNodes[0].data.usage, 'internal');
-  assert.equal(r.addNodes[0].__autoGen.source, 'reception_steps');
-  assert.equal(r.addOperationTypes.length, 2);
-  assert.deepEqual(r.addOperationTypes.map(o => o.label), ['Receipts', 'Storage']);
-  assert.equal(r.addRoutes.length, 1);
-  assert.equal(r.addRoutes[0].rules.length, 2);
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'two_steps' } }));
+  const recvNodes  = r.addNodes.filter(n => n.__autoGen?.source === 'reception_steps');
+  const recvOps    = r.addOperationTypes.filter(o => o.__autoGen?.source === 'reception_steps');
+  const recvRoutes = r.addRoutes.filter(rt => rt.__autoGen?.source === 'reception_steps');
+  assert.equal(recvNodes.length, 1);
+  assert.equal(recvNodes[0].label, 'WH/Input');
+  assert.equal(recvNodes[0].data.usage, 'internal');
+  assert.equal(recvNodes[0].__autoGen.source, 'reception_steps');
+  assert.equal(recvOps.length, 2);
+  assert.deepEqual(recvOps.map(o => o.label), ['Receipts', 'Storage']);
+  assert.equal(recvRoutes.length, 1);
+  assert.equal(recvRoutes[0].rules.length, 2);
   // MTO chain ending in MTS
-  assert.equal(r.addRoutes[0].rules[0].procure_method, 'make_to_order');
-  assert.equal(r.addRoutes[0].rules[1].procure_method, 'make_to_stock');
+  assert.equal(recvRoutes[0].rules[0].procure_method, 'make_to_order');
+  assert.equal(recvRoutes[0].rules[1].procure_method, 'make_to_stock');
 });
 
 it('reception_steps=three_steps adds Input + QC + 3 op-types + 1 route w/ 3 rules', () => {
-  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'three_steps', delivery_steps: '' } }));
-  assert.equal(r.addNodes.length, 2);
-  assert.deepEqual(r.addNodes.map(n => n.label).sort(), ['WH/Input', 'WH/Quality Control']);
-  assert.equal(r.addOperationTypes.length, 3);
-  assert.deepEqual(r.addOperationTypes.map(o => o.label), ['Receipts', 'Quality Check', 'Storage']);
-  assert.equal(r.addRoutes.length, 1);
-  assert.equal(r.addRoutes[0].rules.length, 3);
-  assert.equal(r.addRoutes[0].rules[2].procure_method, 'make_to_stock');
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags, reception_steps: 'three_steps' } }));
+  const recvNodes  = r.addNodes.filter(n => n.__autoGen?.source === 'reception_steps');
+  const recvOps    = r.addOperationTypes.filter(o => o.__autoGen?.source === 'reception_steps');
+  const recvRoutes = r.addRoutes.filter(rt => rt.__autoGen?.source === 'reception_steps');
+  assert.equal(recvNodes.length, 2);
+  assert.deepEqual(recvNodes.map(n => n.label).sort(), ['WH/Input', 'WH/Quality Control']);
+  assert.equal(recvOps.length, 3);
+  assert.deepEqual(recvOps.map(o => o.label), ['Receipts', 'Quality Check', 'Storage']);
+  assert.equal(recvRoutes.length, 1);
+  assert.equal(recvRoutes[0].rules.length, 3);
+  assert.equal(recvRoutes[0].rules[2].procure_method, 'make_to_stock');
 });
 
 // ── delivery_steps ─────────────────────────────────────
@@ -122,6 +131,51 @@ it('delivery_steps=pick_pack_ship adds Pack + Output + 3 ops + 1 route w/ 3 rule
   const newRoutes = r.addRoutes.filter(rt => rt.__autoGen?.source === 'delivery_steps');
   assert.equal(newRoutes.length, 1);
   assert.equal(newRoutes[0].rules.length, 3);
+});
+
+// ── manufacture ─────────────────────────────────────
+
+it('manufacture_to_resupply=false produces no manufacture entities', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags, manufacture_to_resupply: false } }));
+  assert.equal(r.addNodes.filter(n => n.__autoGen?.source === 'manufacture').length, 0);
+  assert.equal(r.addOperationTypes.filter(o => o.__autoGen?.source === 'manufacture').length, 0);
+  assert.equal(r.addRoutes.filter(rt => rt.__autoGen?.source === 'manufacture').length, 0);
+});
+
+it('manufacture mrp_one_step adds Production + 2 op-types + 1 route w/ 2 rules', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags,
+    manufacture_to_resupply: true, manufacture_steps: 'mrp_one_step' } }));
+  const ml = r.addNodes.filter(n => n.__autoGen?.source === 'manufacture');
+  assert.deepEqual(ml.map(n => n.data.usage).sort(), ['production']);
+  const mo = r.addOperationTypes.filter(o => o.__autoGen?.source === 'manufacture');
+  assert.deepEqual(mo.map(o => o.label), ['Manufacturing', 'Production output']);
+  const mr = r.addRoutes.filter(rt => rt.__autoGen?.source === 'manufacture');
+  assert.equal(mr.length, 1);
+  assert.equal(mr[0].rules.length, 2);
+  assert.equal(mr[0].rules[0].action, 'manufacture');
+  assert.equal(mr[0].rules[1].action, 'push');
+});
+
+it('manufacture pbm adds Pre-Prod + Production + 3 op-types + 1 route w/ 3 rules', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags,
+    manufacture_to_resupply: true, manufacture_steps: 'pbm' } }));
+  const ml = r.addNodes.filter(n => n.__autoGen?.source === 'manufacture');
+  assert.deepEqual(ml.map(n => n.data.usage).sort(), ['internal', 'production']);
+  const mr = r.addRoutes.filter(rt => rt.__autoGen?.source === 'manufacture');
+  assert.equal(mr[0].rules.length, 3);
+  assert.deepEqual(mr[0].rules.map(r => r.action), ['pull', 'manufacture', 'push']);
+  const lastPbm = mr[0].rules[mr[0].rules.length - 1];
+  assert.equal(lastPbm.data.propagate_cancel, false);
+});
+
+it('manufacture pbm_sam: Post-Production rule is auto=transparent push', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags,
+    manufacture_to_resupply: true, manufacture_steps: 'pbm_sam' } }));
+  const mr = r.addRoutes.find(rt => rt.__autoGen?.source === 'manufacture');
+  const last = mr.rules[mr.rules.length - 1];
+  assert.equal(last.action, 'push');
+  assert.equal(last.auto, 'transparent');
+  assert.equal(last.data.propagate_cancel, true);
 });
 
 await flush();

@@ -49,6 +49,12 @@ export function presetGenerator(input) {
     out.addOperationTypes.push(...r.addOperationTypes);
     out.addRoutes.push(...r.addRoutes);
   }
+  if (input.flags?.manufacture_to_resupply) {
+    const r = _genManufacture(input, ctx);
+    out.addNodes.push(...r.addNodes);
+    out.addOperationTypes.push(...r.addOperationTypes);
+    out.addRoutes.push(...r.addRoutes);
+  }
   return out;
 }
 
@@ -76,10 +82,10 @@ const _ot = (id, label, code, srcId, dstId, seq, autoGen, extra = {}) => ({
   ...extra,
 });
 
-const _rule = (id, label, action, procure, srcId, dstId, otId, auto = 'manual', delay = 0, autoGen) => ({
+const _rule = (id, label, action, procure, srcId, dstId, otId, auto = 'manual', delay = 0, autoGen, propagate_cancel = false) => ({
   id, label, action, procure_method: procure,
   src_location_id: srcId, dest_location_id: dstId, picking_type_id: otId, auto,
-  data: { name: label, action, procure_method: procure, auto, propagate_cancel: false, delay },
+  data: { name: label, action, procure_method: procure, auto, propagate_cancel, delay },
   ...(autoGen ? { __autoGen: autoGen } : {}),
 });
 
@@ -161,6 +167,66 @@ function _genReception(input, ctx) {
         _internal._rule(`${wid}-rl-recv-3`, 'QC → Stock', 'pull', 'make_to_stock',
           qcId, stockId, opS.id, 'manual', 0, tag),
       ], { warehouse_selectable: true }, tag),
+    ],
+  };
+}
+
+function _genManufacture(input, ctx) {
+  const { warehouseId: wid, warehouseCode: code, flags } = input;
+  if (!flags.manufacture_to_resupply) return { addNodes: [], addOperationTypes: [], addRoutes: [] };
+  const tag = _internal._autoTag(wid, 'manufacture');
+  // Route color offset: reception=+0, delivery=+1, manufacture=+2, buy=+4, resupply=+5+idx.
+  const colorIdx = ctx.routeColorBase + 2;
+  const stockId = ctx.stockId;
+  const seq = (suffix) => `${code === 'WH' ? '' : code + '-'}${suffix}`;
+
+  const prodId = `${wid}-production`;
+  const prodLoc = _internal._loc(prodId, `${code}/Production`, 'production', '', {}, tag);
+
+  if (flags.manufacture_steps === 'mrp_one_step') {
+    const opM = _internal._ot(`${wid}-op-mfg`, 'Manufacturing', 'mrp_operation',
+      stockId, prodId, seq('MO'), tag);
+    const opS = _internal._ot(`${wid}-op-mfg-store`, 'Production output', 'internal',
+      prodId, stockId, seq('SFP'), tag);
+    return {
+      addNodes: [prodLoc],
+      addOperationTypes: [opM, opS],
+      addRoutes: [
+        _internal._route(`${wid}-route-mfg`, `Manufacture`, colorIdx, [
+          _internal._rule(`${wid}-rl-mfg-1`, 'Stock → Production', 'manufacture', 'make_to_order',
+            stockId, prodId, opM.id, 'manual', 1, tag),
+          _internal._rule(`${wid}-rl-mfg-2`, 'Production → Stock', 'push', 'make_to_stock',
+            prodId, stockId, opS.id, 'manual', 0, tag),
+        ], { product_selectable: true, product_categ_selectable: true }, tag),
+      ],
+    };
+  }
+
+  // pbm or pbm_sam — both produce Pre-Prod + Production
+  const preId = `${wid}-preprod`;
+  const preLoc = _internal._loc(preId, `${code}/Pre-Production`, 'internal', `${code}-PREPROD`, {}, tag);
+  const opPick = _internal._ot(`${wid}-op-mo-pick`, 'MO Picking', 'internal',
+    stockId, preId, seq('PC'), tag);
+  const opM = _internal._ot(`${wid}-op-mfg`, 'Manufacturing', 'mrp_operation',
+    preId, prodId, seq('MO'), tag);
+  const opS = _internal._ot(`${wid}-op-mfg-store`, 'Post-Production', 'internal',
+    prodId, stockId, seq('SFP'), tag);
+
+  const isSam = flags.manufacture_steps === 'pbm_sam';
+  const pushAuto = isSam ? 'transparent' : 'manual';
+
+  return {
+    addNodes: [preLoc, prodLoc],
+    addOperationTypes: [opPick, opM, opS],
+    addRoutes: [
+      _internal._route(`${wid}-route-mfg`, `Manufacture`, colorIdx, [
+        _internal._rule(`${wid}-rl-mfg-1`, 'Stock → Pre-Prod', 'pull', 'make_to_order',
+          stockId, preId, opPick.id, 'manual', 0, tag),
+        _internal._rule(`${wid}-rl-mfg-2`, 'Pre-Prod → Production', 'manufacture', 'make_to_order',
+          preId, prodId, opM.id, 'manual', 1, tag),
+        _internal._rule(`${wid}-rl-mfg-3`, 'Production → Stock', 'push', 'make_to_stock',
+          prodId, stockId, opS.id, pushAuto, 0, tag, isSam),
+      ], { product_selectable: true, product_categ_selectable: true }, tag),
     ],
   };
 }
