@@ -184,3 +184,131 @@ These two need step-by-step Q&A before deeper implementation:
 - `docs/superpowers/specs/2026-05-08-route-grouped-tier-layout-design.md`
 - `docs/superpowers/plans/2026-05-09-warehouse-preset-wizard-plan-a-creation.md`
 - `dist/odoo-inventory-flow.html` + `addons/konu_tools/static/src/bundle/odoo-inventory-flow.html` — rebuilt
+
+### Roadmap wave 2 (captured 2026-05-09 morning)
+
+Four new items added by Brecht. Documented here so future sessions pick them up.
+
+#### 🟦 Export tool: Markdown setup document
+
+Generate a single `.md` file describing the entire warehouse setup, suitable as project handover documentation or for client review. Triggered from a new toolbar button or `/Export → Markdown`.
+
+**Proposed structure**:
+
+```markdown
+# Warehouse Setup — <client> — generated YYYY-MM-DD
+
+## Warehouses
+| Code | Name | Reception | Delivery | Manufacture | Buy | Resupply |
+|------|------|-----------|----------|-------------|-----|----------|
+| WH | Main Warehouse | 3-step (Input→QC→Stock) | 3-step (Pick→Pack→Ship) | pbm_sam | ✓ | – |
+
+## Locations
+Grouped per-warehouse with usage and properties.
+
+## Operation Types
+Per warehouse, with src→dst, sequence_code, lot/backorder/reservation behaviour.
+
+## Routes & rules
+Each route as a header, then rules in a table (action, src→dst, op-type, MTO/MTS, delay, domain).
+
+## Putaway rules
+Per-location section, listing sequence + product/category + storage_strategy + storage_category.
+
+## Provenance
+Footer noting which entities are wizard-generated vs manual (read from __autoGen).
+```
+
+Implementation: pure function in a new `src/markdown-exporter.js` module, taking `data` and returning a string. Toolbar wire-up in App. No tests required initially; add Node test if it grows complex.
+
+#### 🟦 Export tool: Excel for Odoo import
+
+Generate an `.xlsx` (or CSV bundle) ready to import into Odoo via the standard Import wizard. One sheet per model. Each sheet has an `id` (external_id) column and m2o references resolved by external_id.
+
+**Sheet matrix**:
+
+| Sheet | Odoo model | Key columns |
+|-------|-----------|-------------|
+| `stock.warehouse` | `stock.warehouse` | id, name, code, reception_steps, delivery_steps, manufacture_steps, manufacture_to_resupply, buy_to_resupply, resupply_wh_ids/id |
+| `stock.location` | `stock.location` | id, name, complete_name, usage, location_id/id, removal_strategy_id, storage_category_id/id |
+| `stock.picking.type` | `stock.picking.type` | id, name, code, sequence_code, default_location_src_id/id, default_location_dest_id/id, warehouse_id/id |
+| `stock.route` | `stock.route` | id, name, sequence, product_selectable, product_categ_selectable, warehouse_selectable, sale_selectable |
+| `stock.rule` | `stock.rule` | id, name, route_id/id, action, picking_type_id/id, location_src_id/id, location_dest_id/id, procure_method, auto, propagate_cancel, delay, domain |
+| `stock.putaway.rule` | `stock.putaway.rule` | id, location_in_id/id, location_out_id/id, product_id/id, category_id/id, sequence, storage_strategy, storage_category_id/id |
+
+Use a small client-side library (e.g. `xlsx` from npm — needs adding to deps) OR generate CSVs zipped together. CSV-bundle is simpler (no new dep) and the Odoo Import wizard takes CSVs natively.
+
+**Open questions**:
+- External-id naming: `__import__.<canvas_id>` or a slugified `<model>_<code>`?
+- How to handle mixed-source canvases (some entities from Fetch, some manually added)? The fetched ones have real Odoo ids; the manual ones need new ones.
+- Round-trip: should the import re-use the same external_ids on second export, so edits update in place?
+
+#### 🟨 Push-rule domain preset proposals (research notes)
+
+The push-rule domain helper (already shipped) currently ships 6 generic presets. Brecht wants targeted use-cases mined from Odoo 19's quality + stock modules. **Note**: Odoo source not available on this machine to verify; the proposals below are from general Odoo-19 knowledge and need source verification before shipping.
+
+**Push rule** in Odoo: a `stock.rule` with `action='push'` triggers when a `stock.move` matches the rule's source location. The rule has a `domain` field evaluated against the matched moves. Common shape: `[('product_id.<field>', '<op>', '<val>')]` or `[('move_id.<field>', '<op>', '<val>')]`.
+
+**Proposed presets to add to `DOMAIN_PRESETS`** (categorize the existing 6 + these new 14):
+
+| # | Label | Use case | Expression |
+|---|-------|----------|-----------|
+| 1 | tracked product only | Lot/serial-tracked items get extra QC | `('product_id.tracking', 'in', ('lot', 'serial'))` |
+| 2 | needs expiration | Perishables → mandatory QC | `('product_id.use_expiration_date', '=', True)` |
+| 3 | hazmat | Hazardous goods → segregated storage | `('product_id.hazardous_storage_category_id', '!=', False)` |
+| 4 | high-value | Above price threshold → QC + secure stock | `('product_id.list_price', '>', 1000)` |
+| 5 | from specific vendor | Per-vendor QC requirement | `('move_id.partner_id', 'child_of', <partner_id>)` |
+| 6 | for specific customer | Customer-specific routing | `('move_id.picking_id.partner_id.commercial_company_name', 'ilike', '<customer>')` |
+| 7 | from category | Category-level QC | `('product_id.categ_id.complete_name', 'ilike', '<category>')` |
+| 8 | tagged | Tag-driven applicability | `('product_id.product_tag_ids.name', '=', '<tag>')` |
+| 9 | manufactured here | MO outputs only | `('move_id.production_id', '!=', False)` |
+| 10 | from purchase order | PO receipts only | `('move_id.purchase_line_id', '!=', False)` |
+| 11 | sales-driven | SO-driven moves | `('move_id.sale_line_id', '!=', False)` |
+| 12 | returned from customer | Returns → QC/refurb | `('move_id.location_id.usage', '=', 'customer')` |
+| 13 | direct-ship eligible | Skip storage step | `('product_id.product_tmpl_id.direct_ship_ok', '=', True)` |
+| 14 | weighty | Pallet vs bin routing | `('product_id.weight', '>', 25)` |
+| 15 | bulky | Volume threshold | `('product_id.volume', '>', 0.5)` |
+| 16 | type=storable | Skip services | `('product_id.type', '=', 'product')` |
+| 17 | active route | route active in MO/PO | `('route_ids.active', '=', True)` |
+| 18 | quality alert open | Block until QA closes alert | `('product_id.quality_alert_count', '=', 0)` |
+| 19 | first-receipt | Initial QC always | `('product_id.last_purchase_date', '=', False)` |
+| 20 | seasonal | Date-window applicability | `('product_id.seasonal_start_date', '<=', context_today())` |
+
+**Categorization** (for the UI — group presets in a 2-level menu):
+- **Product properties** (1, 2, 3, 4, 14, 15, 16)
+- **Move source** (5, 6, 7, 8)
+- **Triggering doc** (9, 10, 11)
+- **Special cases** (12, 13, 17, 18, 19, 20)
+
+**Implementation note**: when adding these, restructure the current flat `DOMAIN_PRESETS` array into a `{ category: [presets] }` shape and render the picker as a dropdown with category headers. Some `<INPUT>` placeholders should be marked `<EDIT-ME>` so the user knows to swap in real values.
+
+**Source verification still needed**: confirm in `~/odoo/19.0/odoo/addons/stock/models/stock_rule.py` and `~/odoo/19.0/enterprise/quality/` what `quality.point` triggers exist that overlap with push-rule domains. Odoo source not present on this machine — TODO when next on a workstation with Odoo cloned.
+
+#### 🟧 Miro export — fine-tuning brainstorm (Q&A list)
+
+Before implementing Miro export, the following decisions need answers:
+
+1. **API surface**: Miro REST API v2 (requires per-user OAuth, write to live boards) vs Miro Board JSON (offline file format users import manually) — REST gives interactivity, JSON sidesteps auth complexity. Which?
+2. **Auth pattern (if REST)**: per-user OAuth (best, but each consultant authorizes once) vs a service-account key (simpler, all writes appear from one user)?
+3. **Frame mapping**: 1 warehouse = 1 Miro frame? Or all warehouses on one big frame, with sticky-note grouping?
+4. **Block style**: location nodes as Miro shapes (rectangles) vs sticky notes? Color-coding by usage (supplier=teal, internal=blue, customer=violet, production=amber)?
+5. **Edges**: Miro's connector or simple arrow shapes? Connectors auto-route but are slower to render at scale.
+6. **Operation types**: not natively a Miro construct — render as group titles? as colored backdrops behind their src+dst? as small icons riding the edge midpoint?
+7. **Routes**: separate Miro layers/tags so users can show/hide per route?
+8. **Round-trip**: import-from-Miro? (Probably no — Miro layouts are not constrained, importing back would lose semantic structure.)
+9. **Update vs create**: if a board already exists, does the export update in place (matching block IDs) or create a new copy?
+10. **Audience**: who is this for? consultants showing clients (presentation polish matters) vs internal docs (functional content matters more)?
+
+Given Brecht flagged this as "next phase" + "nice-to-have", target: a 1-page proposal with ASCII mockups answering 1-10, then user picks before coding.
+
+#### Next-up scope (priority order)
+
+When picking next, the order Brecht likely wants:
+
+1. **MD export** (small, high-utility, no auth) — ~half-day implementation.
+2. **Push-rule domain preset additions** (small) — half-day, mostly UI. Verify against Odoo source first.
+3. **Storage categories brainstorm** (medium) — needs the long Q&A pass before any code.
+4. **Sequence numbers brainstorm** (small Q&A).
+5. **Excel/CSV Odoo import export** (medium-large) — requires choosing the external-id strategy.
+6. **Miro brainstorm Q&A** (small Q&A), then implementation (medium-large).
+7. **Plan C verification** (depends on having staging Odoo access).
