@@ -25,18 +25,26 @@
 
 export function presetGenerator(input) {
   const out = { addNodes: [], addOperationTypes: [], addRoutes: [] };
-  // Resolve common ids: vendors (existing or to-be-created), stock (assumed to exist with id `<wid>-stock`)
+  // Resolve common ids: vendors/customers (existing or fallback), stock (assumed to exist with id `<wid>-stock`)
   const vendorsExisting = _findByUsage(input.existingNodes, 'supplier');
+  const customersExisting = _findByUsage(input.existingNodes, 'customer');
   const stockExisting = input.existingNodes.find(n =>
     n.type === 'location' && n.data?.usage === 'internal' &&
     n.id === `${input.warehouseId}-stock`);
   const ctx = {
     vendorsId: vendorsExisting?.id ?? 'loc-vendors',
+    customersId: customersExisting?.id ?? 'loc-customers',
     stockId: stockExisting?.id ?? `${input.warehouseId}-stock`,
     routeColorBase: 0,
   };
   if (input.flags?.reception_steps) {
     const r = _genReception(input, ctx);
+    out.addNodes.push(...r.addNodes);
+    out.addOperationTypes.push(...r.addOperationTypes);
+    out.addRoutes.push(...r.addRoutes);
+  }
+  if (input.flags?.delivery_steps) {
+    const r = _genDelivery(input, ctx);
     out.addNodes.push(...r.addNodes);
     out.addOperationTypes.push(...r.addOperationTypes);
     out.addRoutes.push(...r.addRoutes);
@@ -96,6 +104,7 @@ function _genReception(input, ctx) {
   const stockId = ctx.stockId;
   const vendorsId = ctx.vendorsId;
   const tag = _internal._autoTag(wid, 'reception_steps');
+  // Route color offset: reception=+0, delivery=+1, manufacture=+2, buy=+4, resupply=+5+idx.
   const colorIdx = ctx.routeColorBase + 0;
 
   if (flags.reception_steps === 'one_step') {
@@ -152,6 +161,73 @@ function _genReception(input, ctx) {
         _internal._rule(`${wid}-rl-recv-3`, 'QC → Stock', 'pull', 'make_to_stock',
           qcId, stockId, opS.id, 'manual', 0, tag),
       ], { warehouse_selectable: true }, tag),
+    ],
+  };
+}
+
+function _genDelivery(input, ctx) {
+  const { warehouseId: wid, warehouseCode: code, flags } = input;
+  const stockId = ctx.stockId;
+  const customersId = ctx.customersId;
+  const tag = _internal._autoTag(wid, 'delivery_steps');
+  // Route color offset: reception=+0, delivery=+1, manufacture=+2, buy=+4, resupply=+5+idx.
+  const colorIdx = ctx.routeColorBase + 1;
+  const seq = (suffix) => `${code === 'WH' ? '' : code + '-'}${suffix}`;
+
+  if (flags.delivery_steps === 'ship_only') {
+    return {
+      addNodes: [],
+      addOperationTypes: [
+        _internal._ot(`${wid}-op-deliv`, 'Delivery Orders', 'outgoing',
+          stockId, customersId, seq('OUT'), tag),
+      ],
+      addRoutes: [],
+    };
+  }
+
+  const outputId = `${wid}-output`;
+  const outputLoc = _internal._loc(outputId, `${code}/Output`, 'internal', `${code}-OUTPUT`, {}, tag);
+
+  if (flags.delivery_steps === 'pick_ship') {
+    const opP = _internal._ot(`${wid}-op-pick`, 'Pick', 'internal',
+      stockId, outputId, seq('PICK'), tag);
+    const opD = _internal._ot(`${wid}-op-deliv`, 'Delivery Orders', 'outgoing',
+      outputId, customersId, seq('OUT'), tag);
+    return {
+      addNodes: [outputLoc],
+      addOperationTypes: [opP, opD],
+      addRoutes: [
+        _internal._route(`${wid}-route-deliv`, `Pick → Ship`, colorIdx, [
+          _internal._rule(`${wid}-rl-deliv-1`, 'Stock → Output', 'pull', 'make_to_order',
+            stockId, outputId, opP.id, 'manual', 0, tag),
+          _internal._rule(`${wid}-rl-deliv-2`, 'Output → Customers', 'pull', 'make_to_order',
+            outputId, customersId, opD.id, 'manual', 0, tag),
+        ], { warehouse_selectable: true, sale_selectable: true }, tag),
+      ],
+    };
+  }
+
+  // pick_pack_ship
+  const packId = `${wid}-pack`;
+  const packLoc = _internal._loc(packId, `${code}/Packing`, 'internal', `${code}-PACK`, {}, tag);
+  const opP  = _internal._ot(`${wid}-op-pick`, 'Pick', 'internal',
+    stockId, packId, seq('PICK'), tag);
+  const opPk = _internal._ot(`${wid}-op-pack`, 'Pack', 'internal',
+    packId, outputId, seq('PACK'), tag);
+  const opD  = _internal._ot(`${wid}-op-deliv`, 'Delivery Orders', 'outgoing',
+    outputId, customersId, seq('OUT'), tag);
+  return {
+    addNodes: [packLoc, outputLoc],
+    addOperationTypes: [opP, opPk, opD],
+    addRoutes: [
+      _internal._route(`${wid}-route-deliv`, `Pick → Pack → Ship`, colorIdx, [
+        _internal._rule(`${wid}-rl-deliv-1`, 'Stock → Packing', 'pull', 'make_to_order',
+          stockId, packId, opP.id, 'manual', 0, tag),
+        _internal._rule(`${wid}-rl-deliv-2`, 'Packing → Output', 'pull', 'make_to_order',
+          packId, outputId, opPk.id, 'manual', 0, tag),
+        _internal._rule(`${wid}-rl-deliv-3`, 'Output → Customers', 'pull', 'make_to_order',
+          outputId, customersId, opD.id, 'manual', 0, tag),
+      ], { warehouse_selectable: true, sale_selectable: true }, tag),
     ],
   };
 }
