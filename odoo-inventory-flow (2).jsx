@@ -2186,6 +2186,9 @@ export default function App() {
   const [dragId, setDragId] = useState(null);
   const [dragT, setDragT] = useState(null);
   const [dragOff, setDragOff] = useState({ x: 0, y: 0 });
+  // When dragging a warehouse: { warehouseId, anchorX0, anchorY0, members: [{ id, x0, y0 }] }
+  // Lets the warehouse drag its child locations (and via them, op-type blobs) as a rigid group.
+  const [dragGroup, setDragGroup] = useState(null);
   const [hidden, setHidden] = useState(new Set());
   const [showCfg, setShowCfg] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -3623,11 +3626,30 @@ export default function App() {
     if (type === "node") {
       if (isMulti) {
         setDragOff({ x: e.clientX, y: e.clientY });
+        setDragGroup(null);
       } else {
         const nd = data.nodes.find(n => n.id === id);
         if (nd) setDragOff({ x: e.clientX - (nd.x * scale + offset.x), y: e.clientY - (nd.y * scale + offset.y) });
+        // Warehouse-as-group drag: capture child locations so the whole warehouse
+        // (and any op-type blobs anchored to those locations) move rigidly together.
+        if (nd && nd.type === "warehouse") {
+          const code = nd.data?.code || nd.label || "";
+          const isChild = (n) => n.type === "location" && (
+            (code && (n.data?.complete_name === code)) ||
+            (code && (n.data?.complete_name || "").startsWith(code + "/")) ||
+            (n.__autoGen?.warehouseId === nd.id)
+          );
+          const members = data.nodes
+            .filter(isChild)
+            .map(n => ({ id: n.id, x0: n.x, y0: n.y }));
+          // Include the warehouse itself so the delta is applied uniformly.
+          members.push({ id: nd.id, x0: nd.x, y0: nd.y });
+          setDragGroup({ warehouseId: nd.id, anchorX0: nd.x, anchorY0: nd.y, members });
+        } else {
+          setDragGroup(null);
+        }
       }
-    } else { setDragOff({ x: e.clientX, y: e.clientY }); }
+    } else { setDragOff({ x: e.clientX, y: e.clientY }); setDragGroup(null); }
   }, [data.nodes, scale, offset]);
 
   // Heavy work: applies drag movement. Runs on RAF, not directly on mousemove.
@@ -3648,6 +3670,21 @@ export default function App() {
         const dx = (e.clientX - dragOff.x) / scale, dy = (e.clientY - dragOff.y) / scale;
         setDragOff({ x: e.clientX, y: e.clientY });
         setData(p => ({ ...p, nodes: p.nodes.map(n => multiSel.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n) }));
+      } else if (dragGroup && dragGroup.warehouseId === dragId) {
+        // Warehouse-as-group: apply mouse delta uniformly to every member.
+        // Snap-guides are skipped for group drag — keeps children rigid relative to the warehouse.
+        const newWhX = (e.clientX - dragOff.x - offset.x) / scale;
+        const newWhY = (e.clientY - dragOff.y - offset.y) / scale;
+        const dx = newWhX - dragGroup.anchorX0;
+        const dy = newWhY - dragGroup.anchorY0;
+        setSnapGuides([]);
+        setData(p => {
+          const memberMap = new Map(dragGroup.members.map(m => [m.id, m]));
+          return { ...p, nodes: p.nodes.map(n => {
+            const m = memberMap.get(n.id);
+            return m ? { ...n, x: m.x0 + dx, y: m.y0 + dy } : n;
+          }) };
+        });
       } else {
         let nx = (e.clientX - dragOff.x - offset.x) / scale;
         let ny = (e.clientY - dragOff.y - offset.y) / scale;
@@ -3699,7 +3736,7 @@ export default function App() {
           : o),
       }));
     }
-  }, [isPan, panSt, dragId, dragT, dragOff, offset, scale, multiSel, lasso, connect, data.nodes]);
+  }, [isPan, panSt, dragId, dragT, dragOff, dragGroup, offset, scale, multiSel, lasso, connect, data.nodes]);
 
   // RAF-throttle mousemove so very fast cursors don't queue dozens of setData calls
   const onMove = useCallback((e) => {
@@ -3765,6 +3802,7 @@ export default function App() {
       setConnect(null);
     }
     setIsPan(false); setDragId(null); setDragT(null);
+    setDragGroup(null);
     setSnapGuides([]);
     dragThresholdRef.current = false;
     downPosRef.current = null;
@@ -4021,6 +4059,7 @@ export default function App() {
               const sww = (maxX - minX) * scale;
               const shw = (maxY - minY) * scale;
               const isSelW = sel?.id === wh.id;
+              const isDraggingW = dragId === wh.id && dragGroup?.warehouseId === wh.id;
               const wcol = T.accent;
               return (
                 <g key={`whbg-${wh.id}`}
@@ -4031,9 +4070,9 @@ export default function App() {
                         rx={Math.min(40, Math.min(sww, shw) / 6)}
                         ry={Math.min(40, Math.min(sww, shw) / 6)}
                         fill={`${wcol}07`} stroke={wcol}
-                        strokeWidth={isSelW ? 2 : 1.4}
+                        strokeWidth={isDraggingW ? 2.4 : isSelW ? 2 : 1.4}
                         strokeDasharray={`${10 * scale} ${5 * scale}`}
-                        strokeOpacity={isSelW ? 0.75 : 0.4}
+                        strokeOpacity={isDraggingW ? 0.9 : isSelW ? 0.75 : 0.4}
                         style={{ cursor: "pointer" }} />
                   {/* Warehouse name tag — sits on the top edge, draggable selection-only */}
                   <foreignObject x={sxw + 14 * scale} y={syw - 13 * scale} width={320} height={24} style={{ overflow: "visible" }}>
