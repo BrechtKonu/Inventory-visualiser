@@ -1928,14 +1928,65 @@ export default function App() {
   const buildExportSvg = useCallback(() => {
     if (!svgRef.current) return null;
     const clone = svgRef.current.cloneNode(true);
-    // Compute world-space bbox of all visible content
-    const visible = data.nodes.filter(n => !(hideUnused && n.type === "location" && !usedLocationIds.has(n.id)));
-    if (visible.length === 0) return null;
-    const PAD = 60;
-    const minX = Math.min(...visible.map(n => n.x)) - PAD;
-    const minY = Math.min(...visible.map(n => n.y)) - PAD;
-    const maxX = Math.max(...visible.map(n => n.x + NW)) + PAD;
-    const maxY = Math.max(...visible.map(n => n.y + NH)) + PAD;
+
+    // Compute world-space bbox by unioning every visual element's actual extents:
+    //   - leaf location/warehouse nodes: their NW × NH rect
+    //   - warehouse blobs: child-cluster + 80px PAD + 14px name tag
+    //   - view-location blobs: nested-children + 36px PAD + 11px name tag
+    //   - op-type blobs: src+dest cluster + 30px PAD
+    //   - op-type label callouts: blob position + labelDx/Dy + ~280px wide tag
+    const visibleNodes = data.nodes.filter(n => !(hideUnused && n.type === "location" && !usedLocationIds.has(n.id)));
+    if (visibleNodes.length === 0) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const include = (x, y, w = 0, h = 0) => {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    };
+
+    // Leaf nodes
+    for (const n of visibleNodes) include(n.x, n.y, NW, NH);
+
+    // Warehouse blobs (auto-fit to their visible children + 80px pad + name-tag)
+    for (const wh of visibleNodes.filter(n => n.type === "warehouse")) {
+      const code = wh.data?.code || wh.label || "";
+      const kids = visibleNodes.filter(n => {
+        if (n.type !== "location") return false;
+        const cn = n.data?.complete_name || n.label || "";
+        return cn === code || cn.startsWith(code + "/");
+      });
+      if (kids.length === 0) continue;
+      let kMinX = Infinity, kMinY = Infinity, kMaxX = -Infinity, kMaxY = -Infinity;
+      for (const k of kids) {
+        if (k.x < kMinX) kMinX = k.x;
+        if (k.y < kMinY) kMinY = k.y;
+        if (k.x + NW > kMaxX) kMaxX = k.x + NW;
+        if (k.y + NH > kMaxY) kMaxY = k.y + NH;
+      }
+      include(kMinX - 80, kMinY - 80 - 14, (kMaxX - kMinX) + 160, (kMaxY - kMinY) + 160 + 14);
+    }
+
+    // Op-type blobs + label callouts
+    for (const op of data.operationTypes) {
+      const sn = data.nodes.find(n => n.id === op.src_location_id);
+      const dn = data.nodes.find(n => n.id === op.dest_location_id);
+      if (!sn || !dn) continue;
+      const oMinX = Math.min(sn.x, dn.x) - 30;
+      const oMinY = Math.min(sn.y, dn.y) - 30;
+      const oMaxX = Math.max(sn.x + NW, dn.x + NW) + 30;
+      const oMaxY = Math.max(sn.y + NH, dn.y + NH) + 30;
+      include(oMinX, oMinY, oMaxX - oMinX, oMaxY - oMinY);
+      // Label callout — default position is (blob.minX + 6, blob.minY - 14), then offset
+      const lx = oMinX + 6 + (op.labelDx || 0);
+      const ly = oMinY - 14 + (op.labelDy || 0);
+      include(lx, ly, 280, 22);
+    }
+
+    // Final padding so the boundary itself isn't tight
+    const FINAL_PAD = 24;
+    minX -= FINAL_PAD; minY -= FINAL_PAD; maxX += FINAL_PAD; maxY += FINAL_PAD;
     const w = maxX - minX, h = maxY - minY;
     // Re-create as a fresh SVG with the right viewBox (ignores current pan/zoom).
     // We can't easily re-render — easier to wrap the clone in a transform that
