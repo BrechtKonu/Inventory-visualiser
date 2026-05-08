@@ -149,20 +149,38 @@ Remaining roadmap (deferred):
 - **MCP integration (KOTASK-065 Phase 2)** — point the `odoo-customer` MCP server at `konu.customer.connection` records (filter `mcp_exposed=True`).
 - **Customer-side fallback module (Option A)** — for security-conscious customers who refuse to share API keys. Same React bundle, mounted in a customer-side client_action with same-origin auth.
 - **API key rotation reminders** — `mail.activity` cron creating "rotate API key" follow-ups on connections with keys older than 6 months.
-<<<<<<< HEAD
 
-### Next-up scope (May 2026, captured from a single brain-dump session)
+### Overnight 2026-05-08 → 2026-05-09 wave (status as of morning)
 
-These items must work in BOTH the standalone HTML and the Odoo-module bundle (the build already writes to both — keep it that way for everything below).
+Eight features shipped overnight on `main`. The pure-module test suite is at **25 passing** (`npm run test:presets`). Both bundles rebuild cleanly. Plan C is parked at worktree branch `worktree-agent-a109b0e7415c5da2d` for review.
 
-- ✅ **Warehouse-creation presets — Plan A (creation only)** — wizard for `Add → Warehouse` with reception_steps / delivery_steps / manufacture (incl. manufacture_steps) / buy_to_resupply / resupply_wh_ids flags. Pure-function generators in `src/warehouse-presets.js` cascade locations + op-types + routes + rules. Provenance via `__autoGen = { warehouseId, source }` round-trips through JSON export. Smart name/code defaults bundled here (same roadmap item 6). **Plan B (live regen on field edits, with shrink-detection dialog)** and **Plan C ("Create in Odoo" mode that pushes via the proxy and re-imports)** are still pending — separate plans in `docs/superpowers/specs/2026-05-08-warehouse-preset-wizard-design.md` describe them.
-- **Push-rule domain helper** — push rules in Odoo accept a domain that filters which products they apply to. Add a domain builder (free-text + presets). Preset examples to ship: "has a quality check route", "has stock in <location>", "product has tag X", "product category Y". Make these one-click "insert" suggestions, not just docs.
-- **Putaway-rule storage strategies** — Odoo putaway rules support `storage_strategy` values (`closest_location`, `least_packages`, `manual_no_strategy`) and `storage_category_id`. Currently the visualiser only models product/category/sequence. Extend the per-location panel to surface strategy and category fields.
-- **Storage categories + capacity + sub-location levels** — open question, needs a brainstorm session. User wants right-click on a location node → sub-location view (open a nested canvas?). Storage categories assignment, capacity numbers, multi-level location trees (`WH/Stock/Shelf A/Bin 1` is currently a string in putaway-rule output, not a real node graph). **Before coding this, run a long brainstorming pass** — user said "ask me a huge amount of questions step by step".
-- **Templates: append mode** — currently applying a template overwrites `data` (with undo push). Add a second action "Add to current canvas" that merges the template's nodes/routes into the existing graph (with id remapping to avoid collisions, similar to how the warehouse-preset wizard would auto-create on top).
-- **Smart name/code suggestions on create** — when adding a new location, warehouse, op-type, etc., propose a short name + code from context (e.g. new internal location under `WH/Stock` → suggest `WH/Stock/Shelf X` or pick the next free letter). Same for `sequence_code` on op-types.
-- 🟡 **Sequence numbers** — **partial: minimal backfill on import** for putaway `sequence` (i*10 with gaps) and op-type `sequence_code` (uppercase initials of words). Brainstorm still required for: warehouse `code` autogen, route `sequence` semantics, conflict resolution when generated codes collide, whether to render sequences in the canvas. **TODO: ask Brecht the Q&A list before extending.**
-- **Miro export/import (nice-to-have)** — warehouses → Miro frames; locations → blocks; operation types → grouped blocks with leader-line callouts; rules → arrows; routes → colour groups. Possibly use Miro's REST API + board-export JSON. Flagged as a later phase.
-=======
-- 🟡 **Storage categories + capacity + sub-location levels** — **partial: storage_category_id + capacity surfaced on locations, badge shown on canvas**. Brainstorming still required for: nested-canvas sub-location view, capacity-based putaway algorithm, multi-level location trees (`WH/Stock/Shelf A/Bin 1` as real node graph vs string), storage-category capacity rules. **TODO: ask Brecht the long Q&A list before extending this further.**
->>>>>>> f117da8 ([ADD] location capacity field + canvas badge for storage_category/capacity (minimal — full brainstorm pending))
+- ✅ **Auto-layout: route-grouped tier layout with center-axis shared nodes** — each route gets a numeric `laneRank` from its action signature; nodes shared by multiple routes auto-pin to the center axis. Constants: `Y_CENTER=400`, `LANE_GAP=110`, drift only fires for genuinely linear chains.
+- ✅ **Warehouse-creation presets — Plan A (creation flow)** — wizard for `Add → Warehouse` with reception/delivery/manufacture/buy/resupply flags. Pure-function generators in `src/warehouse-presets.js`. Provenance via `__autoGen = { warehouseId, source }` round-trips through JSON. Smart code/name defaults (`WH<n>`, `Main/Secondary/Tertiary Warehouse`). Resupply m2m chip picker shown when canvas has ≥1 existing warehouse. Live preview panel.
+- ✅ **Warehouse-creation presets — Plan B (live regen + shrink dialog)** — editing `reception_steps`/`delivery_steps`/`manufacture_to_resupply`/`manufacture_steps`/`buy_to_resupply`/`resupply_wh_ids` on an existing warehouse intercepts via `presetDiff`. Pure grow applies directly with undo. Shrink opens `ShrinkDialog` with orphan list + external-rule references. Three resolutions: Cancel / Delete orphans / Keep but deactivate (`active=false` + `__autoGen.deactivated=true`). "Show inactive" sidebar toggle dims deactivated entities to opacity 0.4.
+- ⏸ **Warehouse-creation presets — Plan C (Create in Odoo)** — built but parked at worktree `worktree-agent-a109b0e7415c5da2d`. UI scaffold complete (button, confirm dialog with mandatory checkbox); `createWarehouseInOdoo` calls `stock.warehouse.create` via existing proxy and re-imports with `__autoGen` source-tag inference from labels. Untested against live Odoo — that's why it's parked, awaiting a staging-instance test before merge.
+- ✅ **Push-rule domain helper** — `domain` field on rules in PropPanel. Textarea + 6 preset insert buttons (`has QC route`, `stock in location`, `has product tag`, `product category`, `on sale`, `is purchasable`) plus a "Wrap in [...]" button.
+- ✅ **Putaway storage strategies** — `storage_strategy` (manual_no_strategy / closest_location / least_packages) and `storage_category_id` surfaced per putaway rule. `storage_category_id` also added to location field schema. Generated API code includes the new fields in fetch templates.
+- ✅ **Templates append mode** — every template card now has Replace + "+ Add" buttons. Add merges with id-remapping (`tXXXX-` prefix) and dedupes shared semantic locations (Vendors/Customers map to existing canvas nodes). One undo step.
+- ✅ **Drag warehouse blob with contents** — dragging a warehouse node now drags all its child locations as a rigid group (children identified by `complete_name` prefix OR `__autoGen.warehouseId` tag). Op-type blobs follow automatically because their endpoints moved. Heavier stroke on the blob during drag for visual feedback. Disabled when multi-select is active to avoid double-handling.
+- 🟡 **Storage categories + capacity** (partial) — `capacity` numeric field added to locations; canvas shows monospace badge below internal locations when `capacity` or `storage_category_id` is set. **Sub-location nested view, capacity-based putaway algorithm, multi-level location trees still pending — needs the long Q&A pass.** TODO comments in code mark the location.
+- 🟡 **Sequence numbers on import** (partial) — `backfillSequences()` helper auto-fills missing putaway `sequence` (`(i+1)*10`) and op-type `sequence_code` (3-char prefix from label initials) on both JSON-import and Odoo-fetch paths. **Warehouse `code` autogen, route `sequence` semantics, prefix-collision resolution, in-canvas sequence display still pending — needs Q&A.**
+- ⏸ **Miro export/import** (nice-to-have) — explicitly deferred. Warehouses → Miro frames; locations → blocks; rules → arrows; routes → colour groups. To be tackled in a future pass.
+
+### Brainstorming-pending items for the next session
+
+These two need step-by-step Q&A before deeper implementation:
+
+1. **Storage categories deep dive** — sub-location nested-canvas view (right-click → drill in?), capacity-based putaway (when full, fall through to next strategy), multi-level location trees as real nodes vs path strings, storage-category-on-warehouse vs on-location.
+
+2. **Sequence numbers deep dive** — warehouse-code autogen (collision-free?), route sequence semantics (do they affect priority?), what to do when generated sequence_codes collide (e.g. "Quality Check" and "Quick Customs" both → "QCC"?), whether to render sequence on the canvas.
+
+### Files changed
+
+- `odoo-inventory-flow.jsx (2)` — main file, ~+500 lines for the wave
+- `src/warehouse-presets.js` — pure module, generators + presetDiff
+- `src/warehouse-presets.test.mjs` — 25 standalone Node tests
+- `package.json` — `test:presets` script
+- `docs/superpowers/specs/2026-05-08-warehouse-preset-wizard-design.md`
+- `docs/superpowers/specs/2026-05-08-route-grouped-tier-layout-design.md`
+- `docs/superpowers/plans/2026-05-09-warehouse-preset-wizard-plan-a-creation.md`
+- `dist/odoo-inventory-flow.html` + `addons/konu_tools/static/src/bundle/odoo-inventory-flow.html` — rebuilt
