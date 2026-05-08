@@ -1,0 +1,832 @@
+{
+  "version": 1,
+  "exportedAt": "2026-05-08T21:22:15.092Z",
+  "data": {
+    "nodes": [
+      {
+        "id": "wh1",
+        "type": "warehouse",
+        "label": "Main Warehouse",
+        "x": 370,
+        "y": 148.75,
+        "data": {
+          "code": "WH",
+          "name": "Main Warehouse",
+          "reception_steps": "three_steps",
+          "delivery_steps": "pick_pack_ship",
+          "buy_to_resupply": true,
+          "manufacture_to_resupply": true
+        }
+      },
+      {
+        "id": "loc-vendors",
+        "type": "location",
+        "label": "Vendors",
+        "x": 80,
+        "y": 178.75,
+        "data": {
+          "complete_name": "Vendors",
+          "usage": "supplier",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": ""
+        }
+      },
+      {
+        "id": "loc-customers",
+        "type": "location",
+        "label": "Customers",
+        "x": 1820,
+        "y": 585.46875,
+        "data": {
+          "complete_name": "Customers",
+          "usage": "customer",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": ""
+        }
+      },
+      {
+        "id": "loc-input",
+        "type": "location",
+        "label": "WH/Input",
+        "x": 370,
+        "y": 247.5,
+        "data": {
+          "complete_name": "WH/Input",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-INPUT"
+        }
+      },
+      {
+        "id": "loc-qc",
+        "type": "location",
+        "label": "WH/Quality Control",
+        "x": 660,
+        "y": 238.75,
+        "data": {
+          "complete_name": "WH/Quality Control",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-QC"
+        }
+      },
+      {
+        "id": "loc-stock",
+        "type": "location",
+        "label": "WH/Stock",
+        "x": 950,
+        "y": 311.875,
+        "data": {
+          "complete_name": "WH/Stock",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-STOCK"
+        }
+      },
+      {
+        "id": "loc-output",
+        "type": "location",
+        "label": "WH/Output",
+        "x": 1530,
+        "y": 485.46875,
+        "data": {
+          "complete_name": "WH/Output",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-OUTPUT"
+        }
+      },
+      {
+        "id": "loc-packing",
+        "type": "location",
+        "label": "WH/Packing",
+        "x": 1240,
+        "y": 425.9375,
+        "data": {
+          "complete_name": "WH/Packing",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-PACK"
+        }
+      },
+      {
+        "id": "loc-preprod",
+        "type": "location",
+        "label": "WH/Pre-Production",
+        "x": 1240,
+        "y": 325.9375,
+        "data": {
+          "complete_name": "WH/Pre-Production",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-PREPROD"
+        }
+      },
+      {
+        "id": "loc-production",
+        "type": "location",
+        "label": "Virtual/Production",
+        "x": 1530,
+        "y": 385.46875,
+        "data": {
+          "complete_name": "Virtual/Production",
+          "usage": "production",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": ""
+        }
+      },
+      {
+        "id": "loc-crossdock",
+        "type": "location",
+        "label": "WH/CrossDock",
+        "x": 660,
+        "y": 338.75,
+        "data": {
+          "complete_name": "WH/CrossDock",
+          "usage": "internal",
+          "scrap_location": false,
+          "replenish_location": false,
+          "removal_strategy": "fifo",
+          "barcode": "WH-XDOCK"
+        }
+      }
+    ],
+    "operationTypes": [
+      {
+        "id": "op-receipt",
+        "label": "Receipts",
+        "code": "incoming",
+        "sequence_code": "IN",
+        "src_location_id": "loc-vendors",
+        "dest_location_id": "loc-input",
+        "data": {
+          "name": "Receipts",
+          "code": "incoming",
+          "sequence_code": "IN",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": true,
+          "use_existing_lots": false,
+          "show_reserved": true
+        },
+        "labelDx": 194,
+        "labelDy": -26
+      },
+      {
+        "id": "op-qc",
+        "label": "Quality Check",
+        "code": "internal",
+        "sequence_code": "QC",
+        "src_location_id": "loc-input",
+        "dest_location_id": "loc-qc",
+        "data": {
+          "name": "Quality Check",
+          "code": "internal",
+          "sequence_code": "QC",
+          "create_backorder": "never",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 259,
+        "labelDy": -14
+      },
+      {
+        "id": "op-store",
+        "label": "Store",
+        "code": "internal",
+        "sequence_code": "STO",
+        "src_location_id": "loc-qc",
+        "dest_location_id": "loc-stock",
+        "data": {
+          "name": "Store (QC → Stock)",
+          "code": "internal",
+          "sequence_code": "STO",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 194,
+        "labelDy": -26
+      },
+      {
+        "id": "op-pick",
+        "label": "Pick",
+        "code": "internal",
+        "sequence_code": "PICK",
+        "src_location_id": "loc-stock",
+        "dest_location_id": "loc-packing",
+        "data": {
+          "name": "Pick",
+          "code": "internal",
+          "sequence_code": "PICK",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 194,
+        "labelDy": -26
+      },
+      {
+        "id": "op-pack",
+        "label": "Pack",
+        "code": "internal",
+        "sequence_code": "PACK",
+        "src_location_id": "loc-packing",
+        "dest_location_id": "loc-output",
+        "data": {
+          "name": "Pack",
+          "code": "internal",
+          "sequence_code": "PACK",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 129,
+        "labelDy": 146
+      },
+      {
+        "id": "op-delivery",
+        "label": "Delivery Orders",
+        "code": "outgoing",
+        "sequence_code": "OUT",
+        "src_location_id": "loc-output",
+        "dest_location_id": "loc-customers",
+        "data": {
+          "name": "Delivery Orders",
+          "code": "outgoing",
+          "sequence_code": "OUT",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 194,
+        "labelDy": 258
+      },
+      {
+        "id": "op-mo-pick",
+        "label": "MO Picking",
+        "code": "internal",
+        "sequence_code": "PC",
+        "src_location_id": "loc-stock",
+        "dest_location_id": "loc-preprod",
+        "data": {
+          "name": "MO Picking (Stock → Pre-Prod)",
+          "code": "internal",
+          "sequence_code": "PC",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": -31,
+        "labelDy": -14
+      },
+      {
+        "id": "op-mo-prod",
+        "label": "Manufacturing",
+        "code": "internal",
+        "sequence_code": "MO",
+        "src_location_id": "loc-preprod",
+        "dest_location_id": "loc-production",
+        "data": {
+          "name": "Manufacturing",
+          "code": "internal",
+          "sequence_code": "MO",
+          "create_backorder": "never",
+          "reservation_method": "at_confirm",
+          "use_create_lots": true,
+          "use_existing_lots": false,
+          "show_reserved": false
+        },
+        "labelDx": 194,
+        "labelDy": -26
+      },
+      {
+        "id": "op-mo-store",
+        "label": "Post-Production",
+        "code": "internal",
+        "sequence_code": "SFP",
+        "src_location_id": "loc-production",
+        "dest_location_id": "loc-stock",
+        "data": {
+          "name": "Store Finished Products",
+          "code": "internal",
+          "sequence_code": "SFP",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 549,
+        "labelDy": 60
+      },
+      {
+        "id": "op-crossdock",
+        "label": "CrossDock",
+        "code": "internal",
+        "sequence_code": "XD",
+        "src_location_id": "loc-input",
+        "dest_location_id": "loc-crossdock",
+        "data": {
+          "name": "CrossDock Transfer",
+          "code": "internal",
+          "sequence_code": "XD",
+          "create_backorder": "never",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 129,
+        "labelDy": 146
+      },
+      {
+        "id": "op-xd-out",
+        "label": "XD Ship",
+        "code": "outgoing",
+        "sequence_code": "XDS",
+        "src_location_id": "loc-crossdock",
+        "dest_location_id": "loc-customers",
+        "data": {
+          "name": "CrossDock Ship",
+          "code": "outgoing",
+          "sequence_code": "XDS",
+          "create_backorder": "ask",
+          "reservation_method": "at_confirm",
+          "use_create_lots": false,
+          "use_existing_lots": true,
+          "show_reserved": true
+        },
+        "labelDx": 629,
+        "labelDy": 405
+      }
+    ],
+    "routes": [
+      {
+        "id": "route-recv3",
+        "label": "Receive 3 steps (Input→QC→Stock)",
+        "colorIdx": 0,
+        "data": {
+          "name": "WH: Receive in 3 steps",
+          "active": true,
+          "product_selectable": false,
+          "product_categ_selectable": false,
+          "warehouse_selectable": true,
+          "sale_selectable": false
+        },
+        "rules": [
+          {
+            "id": "rl-r3a",
+            "label": "Vendors → Input",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-vendors",
+            "dest_location_id": "loc-input",
+            "picking_type_id": "op-receipt",
+            "auto": "manual",
+            "data": {
+              "name": "Vendors → Input",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-r3b",
+            "label": "Input → QC",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-input",
+            "dest_location_id": "loc-qc",
+            "picking_type_id": "op-qc",
+            "auto": "manual",
+            "data": {
+              "name": "Input → QC",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-r3c",
+            "label": "QC → Stock",
+            "action": "pull",
+            "procure_method": "make_to_stock",
+            "src_location_id": "loc-qc",
+            "dest_location_id": "loc-stock",
+            "picking_type_id": "op-store",
+            "auto": "manual",
+            "data": {
+              "name": "QC → Stock",
+              "action": "pull",
+              "procure_method": "make_to_stock",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "route-pps",
+        "label": "Pick → Pack → Ship (Web)",
+        "colorIdx": 1,
+        "data": {
+          "name": "WH: Pick Pack Ship",
+          "active": true,
+          "product_selectable": false,
+          "product_categ_selectable": false,
+          "warehouse_selectable": true,
+          "sale_selectable": true
+        },
+        "rules": [
+          {
+            "id": "rl-pps1",
+            "label": "Stock → Packing",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-stock",
+            "dest_location_id": "loc-packing",
+            "picking_type_id": "op-pick",
+            "auto": "manual",
+            "data": {
+              "name": "Stock → Packing",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": true,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-pps2",
+            "label": "Packing → Output",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-packing",
+            "dest_location_id": "loc-output",
+            "picking_type_id": "op-pack",
+            "auto": "manual",
+            "data": {
+              "name": "Packing → Output",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": true,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-pps3",
+            "label": "Output → Customers",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-output",
+            "dest_location_id": "loc-customers",
+            "picking_type_id": "op-delivery",
+            "auto": "manual",
+            "data": {
+              "name": "Output → Customers",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": true,
+              "delay": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "route-prod",
+        "label": "Manufacture (with picking)",
+        "colorIdx": 2,
+        "data": {
+          "name": "WH: Manufacture",
+          "active": true,
+          "product_selectable": true,
+          "product_categ_selectable": true,
+          "warehouse_selectable": false,
+          "sale_selectable": false
+        },
+        "rules": [
+          {
+            "id": "rl-mo1",
+            "label": "Stock → Pre-Prod",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-stock",
+            "dest_location_id": "loc-preprod",
+            "picking_type_id": "op-mo-pick",
+            "auto": "manual",
+            "data": {
+              "name": "Stock → Pre-Production",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-mo2",
+            "label": "Pre-Prod → Production",
+            "action": "manufacture",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-preprod",
+            "dest_location_id": "loc-production",
+            "picking_type_id": "op-mo-prod",
+            "auto": "manual",
+            "data": {
+              "name": "Manufacturing Order",
+              "action": "manufacture",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 1
+            }
+          },
+          {
+            "id": "rl-mo3",
+            "label": "Production → Stock",
+            "action": "push",
+            "procure_method": "make_to_stock",
+            "src_location_id": "loc-production",
+            "dest_location_id": "loc-stock",
+            "picking_type_id": "op-mo-store",
+            "auto": "transparent",
+            "data": {
+              "name": "Post-Production → Stock",
+              "action": "push",
+              "procure_method": "make_to_stock",
+              "auto": "transparent",
+              "propagate_cancel": false,
+              "delay": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "route-xdock",
+        "label": "CrossDock",
+        "colorIdx": 3,
+        "data": {
+          "name": "WH: CrossDock",
+          "active": true,
+          "product_selectable": true,
+          "product_categ_selectable": false,
+          "warehouse_selectable": false,
+          "sale_selectable": true
+        },
+        "rules": [
+          {
+            "id": "rl-xd1",
+            "label": "Input → CrossDock",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-input",
+            "dest_location_id": "loc-crossdock",
+            "picking_type_id": "op-crossdock",
+            "auto": "transparent",
+            "data": {
+              "name": "Input → CrossDock",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "transparent",
+              "propagate_cancel": true,
+              "delay": 0
+            }
+          },
+          {
+            "id": "rl-xd2",
+            "label": "CrossDock → Customers",
+            "action": "pull",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-crossdock",
+            "dest_location_id": "loc-customers",
+            "picking_type_id": "op-xd-out",
+            "auto": "manual",
+            "data": {
+              "name": "CrossDock → Customers",
+              "action": "pull",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": true,
+              "delay": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "route-buy",
+        "label": "Buy",
+        "colorIdx": 4,
+        "data": {
+          "name": "WH: Buy",
+          "active": true,
+          "product_selectable": false,
+          "product_categ_selectable": false,
+          "warehouse_selectable": true,
+          "sale_selectable": false
+        },
+        "rules": [
+          {
+            "id": "rl-buy1",
+            "label": "Buy → Input",
+            "action": "buy",
+            "procure_method": "make_to_order",
+            "src_location_id": "loc-vendors",
+            "dest_location_id": "loc-input",
+            "picking_type_id": "op-receipt",
+            "auto": "manual",
+            "data": {
+              "name": "Buy",
+              "action": "buy",
+              "procure_method": "make_to_order",
+              "auto": "manual",
+              "propagate_cancel": false,
+              "delay": 3
+            }
+          }
+        ]
+      }
+    ],
+    "putawayRules": [
+      {
+        "id": "pa-1",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf A/Bin 1",
+        "product": "FURN_7800 Office Desk",
+        "category": "",
+        "sequence": 1
+      },
+      {
+        "id": "pa-2",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf A/Bin 2",
+        "product": "FURN_7801 Standing Desk",
+        "category": "",
+        "sequence": 2
+      },
+      {
+        "id": "pa-3",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf A/Bin 3",
+        "product": "FURN_8999 Ergonomic Chair",
+        "category": "",
+        "sequence": 3
+      },
+      {
+        "id": "pa-4",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf B",
+        "product": "",
+        "category": "Electronics",
+        "sequence": 5
+      },
+      {
+        "id": "pa-5",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf B/Bin 1",
+        "product": "ELEC_001 Laptop 15\"",
+        "category": "",
+        "sequence": 4
+      },
+      {
+        "id": "pa-6",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf B/Bin 2",
+        "product": "ELEC_002 Monitor 27\"",
+        "category": "",
+        "sequence": 4
+      },
+      {
+        "id": "pa-7",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf C",
+        "product": "",
+        "category": "Office Supplies",
+        "sequence": 6
+      },
+      {
+        "id": "pa-8",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf D",
+        "product": "",
+        "category": "Packaging Materials",
+        "sequence": 7
+      },
+      {
+        "id": "pa-9",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf E/Pallet",
+        "product": "",
+        "category": "Raw Materials",
+        "sequence": 8
+      },
+      {
+        "id": "pa-10",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Hazardous",
+        "product": "",
+        "category": "Chemicals",
+        "sequence": 9
+      },
+      {
+        "id": "pa-11",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Cold Room",
+        "product": "",
+        "category": "Perishable",
+        "sequence": 10
+      },
+      {
+        "id": "pa-12",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf F/Oversize",
+        "product": "",
+        "category": "Furniture/Large",
+        "sequence": 11
+      },
+      {
+        "id": "pa-13",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf G",
+        "product": "",
+        "category": "Spare Parts",
+        "sequence": 12
+      },
+      {
+        "id": "pa-14",
+        "location_in_id": "loc-stock",
+        "location_out": "WH/Stock/Shelf A",
+        "product": "",
+        "category": "All",
+        "sequence": 99
+      },
+      {
+        "id": "pa-15",
+        "location_in_id": "loc-qc",
+        "location_out": "WH/QC/Pending",
+        "product": "",
+        "category": "All",
+        "sequence": 10
+      },
+      {
+        "id": "pa-16",
+        "location_in_id": "loc-preprod",
+        "location_out": "WH/Pre-Prod/Line 1",
+        "product": "",
+        "category": "Assemblies",
+        "sequence": 5
+      },
+      {
+        "id": "pa-17",
+        "location_in_id": "loc-preprod",
+        "location_out": "WH/Pre-Prod/Line 2",
+        "product": "",
+        "category": "Components",
+        "sequence": 6
+      }
+    ]
+  },
+  "apiCfg": {
+    "url": "",
+    "db": "",
+    "username": "",
+    "apiKey": ""
+  }
+}

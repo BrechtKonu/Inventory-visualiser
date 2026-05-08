@@ -1376,20 +1376,31 @@ const AddModal = ({ onAdd, routes, onAddRule, onApplyTemplate, onClose }) => {
             <Btn variant="ghost" small icon="close" onClick={onClose} />
           </div>
           <div style={{ padding: "8px 12px 6px", fontSize: 10, color: T.amber, background: T.amberSoft, borderBottom: `1px solid ${T.border}`, lineHeight: 1.4 }}>
-            ⚠ Replaces the current diagram. Export first if you want to keep it.
+            ⚠ "Replace" overwrites the current diagram (export first to keep it). "+ Add" merges into the current canvas with id-remapping.
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: "6px 8px" }}>
             {TEMPLATES.map(tpl => (
-              <button key={tpl.id} onClick={() => { if (confirm(`Replace current diagram with "${tpl.name}"?`)) { onApplyTemplate(tpl); onClose(); } }}
-                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", background: "transparent", border: "none", borderRadius: 5, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}
+              <div key={tpl.id}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", background: "transparent", borderRadius: 5, fontFamily: "inherit" }}
                 onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <div style={{ width: 32, height: 32, borderRadius: 5, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: T.accent, flexShrink: 0 }}>{tpl.icon}</div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{tpl.name}</div>
                   <div style={{ fontSize: 10, color: T.textSoft }}>{tpl.description}</div>
                 </div>
-                <span style={{ fontSize: 10, color: T.accent, fontFamily: "'IBM Plex Mono', monospace" }}>apply →</span>
-              </button>
+                <button
+                  onClick={() => { if (confirm(`Replace current diagram with "${tpl.name}"?`)) { onApplyTemplate(tpl, "replace"); onClose(); } }}
+                  title="Overwrite the current diagram with this template"
+                  style={{ padding: "4px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: T.amber, background: T.amberSoft, border: `1px solid ${T.amber}`, borderRadius: 4, cursor: "pointer", flexShrink: 0 }}>
+                  Replace
+                </button>
+                <button
+                  onClick={() => { onApplyTemplate(tpl, "append"); onClose(); }}
+                  title="Merge this template into the current canvas (ids remapped)"
+                  style={{ padding: "4px 8px", fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", color: T.accent, background: T.accentSoft, border: `1px solid ${T.accent}`, borderRadius: 4, cursor: "pointer", flexShrink: 0 }}>
+                  + Add
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -4753,6 +4764,7 @@ export default function App() {
 
       {/* MODALS */}
       {showCfg && <CfgModal cfg={apiCfg} onChange={setApiCfg} onClose={() => setShowCfg(false)} />}
+<<<<<<< HEAD
       {showAdd && <AddModal onAdd={(type) => {
         if (type === 'warehouse') {
           setShowAdd(false);
@@ -4761,11 +4773,55 @@ export default function App() {
         }
         doAdd(type);
       }} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl) => {
+=======
+      {showAdd && <AddModal onAdd={doAdd} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl, mode = "replace") => {
+        const built = tpl.build();
+>>>>>>> b4b6132 ([ADD] template apply: append mode with id remapping)
         setData(prev => {
           historyRef.current = [...historyRef.current.slice(-49), prev];
           futureRef.current = [];
           setCanUndo(true); setCanRedo(false);
-          return tpl.build();
+          if (mode === "replace") return built;
+          // mode === "append": merge with id remapping, dedup shared semantic locations.
+          const prefix = `t${Math.random().toString(36).slice(2, 6)}-`;
+          // Pre-pass: shared-by-usage locations (Vendors/Customers) remap to existing canvas equivalents.
+          const sharedMap = {};
+          const findExistingByUsage = (usage) => prev.nodes.find(n => n.type === "location" && n.data?.usage === usage);
+          for (const n of built.nodes) {
+            if (n.type === "location" && (n.data?.usage === "supplier" || n.data?.usage === "customer")) {
+              const existing = findExistingByUsage(n.data.usage);
+              if (existing) sharedMap[n.id] = existing.id;
+            }
+          }
+          const mapId = (id) => (id == null ? id : (sharedMap[id] || (prefix + id)));
+          const remappedNodes = built.nodes
+            .filter(n => !sharedMap[n.id])
+            .map(n => ({ ...n, id: mapId(n.id) }));
+          const remappedOps = (built.operationTypes || []).map(o => ({
+            ...o, id: mapId(o.id),
+            src_location_id: mapId(o.src_location_id),
+            dest_location_id: mapId(o.dest_location_id),
+          }));
+          const remappedRoutes = (built.routes || []).map(r => ({
+            ...r, id: mapId(r.id),
+            rules: (r.rules || []).map(rl => ({
+              ...rl, id: mapId(rl.id),
+              src_location_id: mapId(rl.src_location_id),
+              dest_location_id: mapId(rl.dest_location_id),
+              picking_type_id: mapId(rl.picking_type_id),
+            })),
+          }));
+          const remappedPutaway = (built.putawayRules || []).map(pr => ({
+            ...pr, id: mapId(pr.id),
+            location_in_id: mapId(pr.location_in_id),
+          }));
+          return {
+            ...prev,
+            nodes: [...prev.nodes, ...remappedNodes],
+            operationTypes: [...(prev.operationTypes || []), ...remappedOps],
+            routes: [...(prev.routes || []), ...remappedRoutes],
+            putawayRules: [...(prev.putawayRules || []), ...remappedPutaway],
+          };
         });
         setSel(null); setMultiSel(new Set()); setFetchedSnapshot(null);
         setTimeout(() => { autoLayout(); fitToContent(); }, 50);
