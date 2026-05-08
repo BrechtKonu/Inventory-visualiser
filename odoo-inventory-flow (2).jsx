@@ -3,6 +3,7 @@
 // Proprietary — use governed by the LICENSE file in the project root.
 
 import React, { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { presetGenerator } from "./src/warehouse-presets.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
 const DARK_THEME = {
@@ -1029,6 +1030,42 @@ const CfgModal = ({ cfg, onChange, onClose }) => {
   );
 };
 
+// ─── WAREHOUSE PRESET WIZARD ────────────────────────────────────────────
+const WizardModal = ({ existingNodes, onClose, onSkip, onCreate }) => {
+  // Field state — populated in Task 8
+  const [code, setCode] = useState("WH");
+  const [name, setName] = useState("Main Warehouse");
+
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onClose}>
+      <div style={{ width: 720, maxHeight: "85vh", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>New warehouse</span>
+          <Btn variant="ghost" small icon="close" onClick={onClose} />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, color: T.textSoft, marginBottom: 8 }}>Identity</div>
+            <div style={{ fontSize: 11, color: T.textDim }}>Form fields land in Task 8</div>
+          </div>
+          <div style={{ background: T.surfaceHover, borderRadius: 6, padding: 12, fontSize: 11, color: T.textDim }}>
+            Live preview lands in Task 10
+          </div>
+        </div>
+        <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <button onClick={onSkip} style={{ background: "none", border: "none", color: T.accent, fontSize: 11, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", padding: 0 }}>
+            Skip — just add empty WH
+          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
+            <Btn variant="primary" small disabled onClick={onCreate}>Create</Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── ADD MODAL ──────────────────────────────────────────────────────────────
 const AddModal = ({ onAdd, routes, onAddRule, onApplyTemplate, onClose }) => {
   const [ruleTarget, setRuleTarget] = useState(null);
@@ -1856,6 +1893,7 @@ export default function App() {
   const [hidden, setHidden] = useState(new Set());
   const [showCfg, setShowCfg] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [showApi, setShowApi] = useState(false);
   const [apiCfg, setApiCfg] = useState(() => KONU_CFG
     ? { url: KONU_CFG.baseUrl || "", db: KONU_CFG.dbName || "", username: "konu", apiKey: "konu" }
@@ -4227,7 +4265,14 @@ export default function App() {
 
       {/* MODALS */}
       {showCfg && <CfgModal cfg={apiCfg} onChange={setApiCfg} onClose={() => setShowCfg(false)} />}
-      {showAdd && <AddModal onAdd={doAdd} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl) => {
+      {showAdd && <AddModal onAdd={(type) => {
+        if (type === 'warehouse') {
+          setShowAdd(false);
+          setShowWizard(true);
+          return;
+        }
+        doAdd(type);
+      }} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl) => {
         setData(prev => {
           historyRef.current = [...historyRef.current.slice(-49), prev];
           futureRef.current = [];
@@ -4237,6 +4282,12 @@ export default function App() {
         setSel(null); setMultiSel(new Set()); setFetchedSnapshot(null);
         setTimeout(() => { autoLayout(); fitToContent(); }, 50);
       }} onClose={() => setShowAdd(false)} />}
+      {showWizard && <WizardModal
+        existingNodes={data.nodes}
+        onClose={() => setShowWizard(false)}
+        onSkip={() => { setShowWizard(false); doAdd('warehouse'); }}
+        onCreate={() => { /* Task 11 */ }}
+      />}
       {showApi && <ApiPanel data={data} apiConfig={apiCfg} onClose={() => setShowApi(false)} />}
       {showPushModal && <PushModal changes={showPushModal} onConfirm={executePush} onCancel={() => setShowPushModal(null)} />}
       {connectTarget && (() => {
