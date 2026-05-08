@@ -2502,133 +2502,251 @@ export default function App() {
       setCanUndo(true);
       setCanRedo(false);
 
-      const COL_W = 260, ROW_H = 90, PAD_X = 60;
-      const MAX_PER_COL = 8; // wrap to sub-columns when tier has many nodes
-      const ZONE_GAP = 100; // extra gap between usage zones (vendor | internal | customer)
-      const WH_Y   = 15;
-      const PROD_Y = 80;
-      const MAIN_Y = 170;
+      // ── Tunables ─────────────────────────────────────────────────────────
+      const COL_W = 320;          // horizontal tier spacing
+      const ROW_H = 110;          // vertical row spacing
+      const PAD_X = 80, PAD_Y = 200; // canvas-edge padding
+      const BC_ITER = 12;         // barycenter passes (Sugiyama crossing reduction)
+      const RELAX_ITER = 30;      // post-tier vertical relaxation
+      const RELAX_STEP = 0.35;    // how much each pass moves a node toward its target
 
-      // Compute visible nodes (respect hideUnused)
+      // ── Visibility filter ────────────────────────────────────────────────
       const usedIds = new Set();
       if (hideUnused) {
         for (const route of p.routes) for (const rule of route.rules) {
           if (rule.src_location_id) usedIds.add(rule.src_location_id);
           if (rule.dest_location_id) usedIds.add(rule.dest_location_id);
         }
-        for (const pr of p.putawayRules) { if (pr.location_in_id) usedIds.add(pr.location_in_id); }
+        for (const pr of p.putawayRules) if (pr.location_in_id) usedIds.add(pr.location_in_id);
       }
       const flowNodes = p.nodes.filter(n => n.type === "location" && (!hideUnused || usedIds.has(n.id)));
       const warehouseNodes = p.nodes.filter(n => n.type === "warehouse");
       const nodeIds = new Set(flowNodes.map(n => n.id));
 
-      // Classify by usage
+      // ── Usage classifiers ────────────────────────────────────────────────
       const usageMap = new Map(flowNodes.map(n => [n.id, n.data?.usage || ""]));
       const usage = id => usageMap.get(id) || "";
       const isSupplier  = id => usage(id) === "supplier";
       const isCustomer  = id => usage(id) === "customer";
-      const isProd      = id => usage(id) === "production";
-      const isTransit   = id => usage(id) === "transit";
       const isInventory = id => usage(id) === "inventory";
+      const isView      = id => usage(id) === "view";
 
-      // Build unique directed edges
+      // ── Build directed edges (deduped, pointing in flow direction) ───────
       const edgeSet = new Set();
-      const addEdge = (s, d) => { if (nodeIds.has(s) && nodeIds.has(d) && s !== d) edgeSet.add(`${s}\t${d}`); };
-      for (const route of p.routes)
-        for (const rule of route.rules) addEdge(rule.src_location_id, rule.dest_location_id);
-      for (const op of p.operationTypes) addEdge(op.src_location_id, op.dest_location_id);
-      const edges = [...edgeSet].map(e => e.split('\t'));
+      const addEdge = (s, d) => {
+        if (!nodeIds.has(s) || !nodeIds.has(d) || s === d) return;
+        if (isCustomer(s) || isSupplier(d)) return; // never against natural flow
+        edgeSet.add(`${s}\t${d}`);
+      };
+      for (const route of p.routes) for (const rule of route.rules)
+        addEdge(rule.src_location_id, rule.dest_location_id);
+      for (const op of p.operationTypes)
+        addEdge(op.src_location_id, op.dest_location_id);
+      const edges = [...edgeSet].map(e => e.split("\t"));
 
-      // Build adjacency (ignore edges FROM customer or TO supplier)
-      const adj = {};
-      for (const n of flowNodes) adj[n.id] = [];
-      for (const [s, d] of edges)
-        if (!isCustomer(s) && !isSupplier(d)) adj[s].push(d);
+      // ── Adjacency forwards/backwards ─────────────────────────────────────
+      const adjF = {}, adjB = {};
+      for (const n of flowNodes) { adjF[n.id] = []; adjB[n.id] = []; }
+      for (const [s, d] of edges) { adjF[s].push(d); adjB[d].push(s); }
 
-      // In-degrees
-      const inDeg = {};
-      for (const n of flowNodes) inDeg[n.id] = 0;
-      for (const [s, d] of edges)
-        if (!isCustomer(s) && !isSupplier(d) && nodeIds.has(d)) inDeg[d] = (inDeg[d] || 0) + 1;
-
-      // BFS longest-path: suppliers seed at tier 0
-      const depth = {};
-      const seeds = flowNodes.filter(n => isSupplier(n.id) || inDeg[n.id] === 0);
-      const queue = seeds.map(n => n.id);
-      for (const id of queue) depth[id] = isSupplier(id) ? 0 : 1;
-      for (let qi = 0; qi < queue.length && qi < 10000; qi++) {
-        const cur = queue[qi];
-        for (const next of adj[cur]) {
+      // ── Tier assignment via longest-path BFS from sources ────────────────
+      // Sources: suppliers and any node with no incoming edges.
+      const tier = {};
+      const seeds = flowNodes.filter(n => isSupplier(n.id) || adjB[n.id].length === 0);
+      const q = seeds.map(n => n.id);
+      for (const id of q) tier[id] = isSupplier(id) ? 0 : 1;
+      for (let qi = 0; qi < q.length && qi < 50000; qi++) {
+        const cur = q[qi];
+        for (const next of adjF[cur]) {
           if (isCustomer(next)) continue;
-          const nd = depth[cur] + 1;
-          if (depth[next] === undefined || depth[next] < nd) {
-            depth[next] = nd; queue.push(next);
+          const nd = tier[cur] + 1;
+          if (tier[next] === undefined || tier[next] < nd) {
+            tier[next] = nd; q.push(next);
           }
         }
       }
-      for (const n of flowNodes) if (depth[n.id] === undefined) depth[n.id] = 1;
+      for (const n of flowNodes) if (tier[n.id] === undefined) tier[n.id] = 1;
 
-      // Force customers to rightmost tier, inventory nodes to a side lane
-      const maxMainDepth = Math.max(0, ...flowNodes
+      // Force customers to maxTier+1 and inventory loss to its own far-right column
+      const mainMax = Math.max(0, ...flowNodes
         .filter(n => !isCustomer(n.id) && !isInventory(n.id))
-        .map(n => depth[n.id]));
+        .map(n => tier[n.id]));
       for (const n of flowNodes) {
-        if (isCustomer(n.id)) depth[n.id] = maxMainDepth + 1;
+        if (isCustomer(n.id))  tier[n.id] = mainMax + 1;
+        if (isInventory(n.id)) tier[n.id] = mainMax + 1;
       }
 
-      // Separate into three lanes: production/transit, main flow, inventory
-      const prodLane = {}, mainLane = {}, invLane = {};
+      // Group into per-tier ordered lists. Initial order = current y so user-tweaked
+      // positions are preserved when re-laying out.
+      const byTier = new Map();
       for (const n of flowNodes) {
-        const d = depth[n.id];
-        const lane = (isProd(n.id) || isTransit(n.id)) ? prodLane : isInventory(n.id) ? invLane : mainLane;
-        if (!lane[d]) lane[d] = [];
-        lane[d].push(n.id);
+        const t = tier[n.id];
+        if (!byTier.has(t)) byTier.set(t, []);
+        byTier.get(t).push(n.id);
       }
+      const yOf = id => flowNodes.find(n => n.id === id)?.y ?? 0;
+      for (const ids of byTier.values()) ids.sort((a, b) => yOf(a) - yOf(b));
 
-      // Build unified column index — each tier occupies enough sub-columns for its widest lane
-      const allTiers = [...new Set([
-        ...Object.keys(mainLane).map(Number),
-        ...Object.keys(prodLane).map(Number),
-        ...Object.keys(invLane).map(Number),
-      ])].sort((a, b) => a - b);
-
-      // Calculate sub-columns needed per tier (for wrapping large groups)
-      const tierSubCols = {};
-      for (const t of allTiers) {
-        const counts = [mainLane[t]?.length || 0, prodLane[t]?.length || 0, invLane[t]?.length || 0];
-        tierSubCols[t] = Math.max(1, Math.ceil(Math.max(...counts) / MAX_PER_COL));
-      }
-      // Cumulative column offset
-      const tierColStart = {};
-      let colCursor = 0;
-      for (const t of allTiers) {
-        tierColStart[t] = colCursor;
-        colCursor += tierSubCols[t];
-      }
-
-      // Assign positions with sub-column wrapping
-      const newPos = {};
-      const placeLane = (lane, baseY) => {
-        for (const [tier, ids] of Object.entries(lane)) {
-          const t = Number(tier);
-          const startCol = tierColStart[t];
-          ids.forEach((id, i) => {
-            const subCol = Math.floor(i / MAX_PER_COL);
-            const row = i % MAX_PER_COL;
-            newPos[id] = { x: PAD_X + (startCol + subCol) * COL_W, y: baseY + row * ROW_H };
-          });
+      // ── Barycenter crossing reduction (Sugiyama) ─────────────────────────
+      // Alternate down- and up-passes; in each, reorder a tier so each node's
+      // average-neighbor-rank in the previous tier is monotone.
+      const tiers = [...byTier.keys()].sort((a, b) => a - b);
+      const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+      for (let pass = 0; pass < BC_ITER; pass++) {
+        const goingDown = pass % 2 === 0;
+        const order = goingDown ? tiers : [...tiers].reverse();
+        for (let i = 1; i < order.length; i++) {
+          const t = order[i];
+          const ids = byTier.get(t);
+          const refIds = byTier.get(order[i - 1]) || [];
+          const refRank = new Map(refIds.map((id, idx) => [id, idx]));
+          const score = id => {
+            const neigh = goingDown ? adjB[id] : adjF[id];
+            const ranks = neigh.map(n => refRank.get(n)).filter(v => v !== undefined);
+            return avg(ranks);
+          };
+          ids.sort((a, b) => score(a) - score(b) || yOf(a) - yOf(b));
         }
+      }
+
+      // ── Initial position assignment ──────────────────────────────────────
+      const pos = {};
+      for (const t of tiers) {
+        const ids = byTier.get(t);
+        ids.forEach((id, i) => {
+          pos[id] = {
+            x: PAD_X + (t - tiers[0]) * COL_W,
+            y: PAD_Y + i * ROW_H,
+          };
+        });
+      }
+
+      // ── Vertical relaxation ──────────────────────────────────────────────
+      // Each node tries to align to the average y of its neighbors (both fwd & bwd),
+      // with a hard min-gap to prevent overlap. Anchors: suppliers and customers
+      // get pulled to canvas extremes (left supplier, bottom-right customer)
+      // for the diagonal flow Brecht's reference layout shows.
+      const minGap = 90; // min vertical distance between two nodes in same tier
+      for (let it = 0; it < RELAX_ITER; it++) {
+        // Compute targets
+        const targets = {};
+        for (const id of nodeIds) {
+          const fwd = adjF[id].map(n => pos[n]?.y).filter(v => v !== undefined);
+          const bwd = adjB[id].map(n => pos[n]?.y).filter(v => v !== undefined);
+          const all = [...fwd, ...bwd];
+          targets[id] = all.length ? avg(all) : pos[id].y;
+        }
+        // Apply
+        for (const id of nodeIds) {
+          pos[id].y += (targets[id] - pos[id].y) * RELAX_STEP;
+        }
+        // Resolve overlaps within each tier
+        for (const t of tiers) {
+          const ids = [...byTier.get(t)].sort((a, b) => pos[a].y - pos[b].y);
+          for (let i = 1; i < ids.length; i++) {
+            const prev = pos[ids[i - 1]].y;
+            if (pos[ids[i]].y < prev + minGap) pos[ids[i]].y = prev + minGap;
+          }
+        }
+      }
+
+      // ── Customer pull: bottom-right (Brecht's reference layout)  ─────────
+      // Drop customer tier slightly lower than the main flow's bottom for
+      // the characteristic top-left → bottom-right diagonal feel.
+      const allYs = Object.values(pos).map(p => p.y);
+      const yMin = allYs.length ? Math.min(...allYs) : 0;
+      const yMax = allYs.length ? Math.max(...allYs) : 0;
+      const range = Math.max(400, yMax - yMin);
+      for (const n of flowNodes) {
+        if (isCustomer(n.id))   pos[n.id].y = yMin + range * 0.85;
+        if (isSupplier(n.id))   pos[n.id].y = yMin + range * 0.30;
+        if (isInventory(n.id))  pos[n.id].y = yMax + 60;
+      }
+
+      // ── Warehouses: nudged onto a tag-friendly position ──────────────────
+      // Each warehouse anchors above-left of its child cluster (so its name-tag
+      // doesn't collide with op-type labels that auto-place on top).
+      const newPos = { ...pos };
+      warehouseNodes.forEach((wh, i) => {
+        const code = wh.data?.code || wh.label || "";
+        const childIds = flowNodes.filter(n => {
+          const cn = n.data?.complete_name || n.label || "";
+          return cn === code || cn.startsWith(code + "/");
+        }).map(n => n.id);
+        if (childIds.length === 0) {
+          newPos[wh.id] = { x: PAD_X + i * COL_W, y: 20 };
+          return;
+        }
+        const minX = Math.min(...childIds.map(id => pos[id].x));
+        const minY = Math.min(...childIds.map(id => pos[id].y));
+        // Place the warehouse a hair above the cluster (the blob auto-fits anyway)
+        newPos[wh.id] = { x: minX, y: minY - 90 };
+      });
+
+      // ── Auto-place op-type labels (clear labelDx/labelDy or set sensible defaults)
+      // Strategy: for each op-type, place its label callout at one of N positions
+      // around the blob center. Pick the candidate with the lowest collision score
+      // against other labels and other blobs.
+      const opPositions = []; // [{ id, blob: {minX,minY,maxX,maxY}, label: {x,y,w,h} }]
+      const newOps = p.operationTypes.map(op => {
+        const sn = newPos[op.src_location_id], dn = newPos[op.dest_location_id];
+        if (!sn || !dn) return op;
+        const PAD = 30;
+        const blob = {
+          minX: Math.min(sn.x, dn.x) - PAD,
+          minY: Math.min(sn.y, dn.y) - PAD,
+          maxX: Math.max(sn.x + NW, dn.x + NW) + PAD,
+          maxY: Math.max(sn.y + NH, dn.y + NH) + PAD,
+        };
+        const cx = (blob.minX + blob.maxX) / 2;
+        const cy = (blob.minY + blob.maxY) / 2;
+        const LW = 140, LH = 18;
+        // 8 candidates around the blob (N, NE, E, SE, S, SW, W, NW), distance OFFSET
+        const OFF = 30;
+        const candidates = [
+          { x: cx - LW / 2,                 y: blob.minY - OFF - LH }, // N
+          { x: blob.maxX + OFF,             y: blob.minY - LH / 2 },   // NE
+          { x: blob.maxX + OFF,             y: cy - LH / 2 },          // E
+          { x: blob.maxX + OFF,             y: blob.maxY + LH / 2 },   // SE
+          { x: cx - LW / 2,                 y: blob.maxY + OFF },      // S
+          { x: blob.minX - OFF - LW,        y: blob.maxY + LH / 2 },   // SW
+          { x: blob.minX - OFF - LW,        y: cy - LH / 2 },          // W
+          { x: blob.minX - OFF - LW,        y: blob.minY - LH / 2 },   // NW
+        ];
+        // Score each candidate: lower = better
+        const score = (c) => {
+          let s = 0;
+          // Penalty for overlap with other op blobs
+          for (const o of opPositions) {
+            const labelRect = { x0: c.x, y0: c.y, x1: c.x + LW, y1: c.y + LH };
+            // overlap with other blob
+            if (!(labelRect.x1 < o.blob.minX || labelRect.x0 > o.blob.maxX || labelRect.y1 < o.blob.minY || labelRect.y0 > o.blob.maxY)) s += 50;
+            // overlap with other label
+            if (!(labelRect.x1 < o.label.x || labelRect.x0 > o.label.x + o.label.w || labelRect.y1 < o.label.y || labelRect.y0 > o.label.y + o.label.h)) s += 100;
+          }
+          // Slight preference for North position (cleaner)
+          return s;
+        };
+        let best = candidates[0], bestS = Infinity;
+        for (const c of candidates) {
+          const s = score(c);
+          if (s < bestS) { bestS = s; best = c; }
+        }
+        // Convert absolute pos to relative offset (the renderer expects labelDx/labelDy)
+        // Default position the renderer uses is (b.minX + 6, cTop - 14). So:
+        const defaultLx = blob.minX + 6;
+        const defaultLy = blob.minY - 14;
+        const labelDx = Math.round(best.x - defaultLx);
+        const labelDy = Math.round(best.y - defaultLy);
+        opPositions.push({ id: op.id, blob, label: { x: best.x, y: best.y, w: LW, h: LH } });
+        return { ...op, labelDx, labelDy };
+      });
+
+      return {
+        ...p,
+        nodes: p.nodes.map(n => newPos[n.id] ? { ...n, ...newPos[n.id] } : n),
+        operationTypes: newOps,
       };
-      placeLane(mainLane, MAIN_Y);
-      placeLane(prodLane, PROD_Y);
-      // Inventory lane: below main lane
-      const mainMaxY = Math.max(MAIN_Y, ...Object.values(mainLane).map(ids => MAIN_Y + ids.length * ROW_H));
-      placeLane(invLane, mainMaxY + ZONE_GAP);
-
-      // Warehouses: top-left header row
-      warehouseNodes.forEach((n, i) => { newPos[n.id] = { x: PAD_X + i * COL_W, y: WH_Y }; });
-
-      return { ...p, nodes: p.nodes.map(n => newPos[n.id] ? { ...n, ...newPos[n.id] } : n) };
     });
   }, [hideUnused]);
 
