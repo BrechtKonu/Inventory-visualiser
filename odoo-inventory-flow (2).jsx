@@ -4816,7 +4816,6 @@ export default function App() {
 
       {/* MODALS */}
       {showCfg && <CfgModal cfg={apiCfg} onChange={setApiCfg} onClose={() => setShowCfg(false)} />}
-<<<<<<< HEAD
       {showAdd && <AddModal onAdd={(type) => {
         if (type === 'warehouse') {
           setShowAdd(false);
@@ -4824,11 +4823,8 @@ export default function App() {
           return;
         }
         doAdd(type);
-      }} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl) => {
-=======
-      {showAdd && <AddModal onAdd={doAdd} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl, mode = "replace") => {
+      }} routes={data.routes} onAddRule={addRuleToRoute} onApplyTemplate={(tpl, mode = "replace") => {
         const built = tpl.build();
->>>>>>> b4b6132 ([ADD] template apply: append mode with id remapping)
         setData(prev => {
           historyRef.current = [...historyRef.current.slice(-49), prev];
           futureRef.current = [];
