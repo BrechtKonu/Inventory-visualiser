@@ -335,6 +335,11 @@ const fieldDefs = {
     { key: "category_id", label: "Product Category", type: "ref", hint: "product.category" },
     { key: "package_type_ids", label: "Package Types", type: "m2m", source: "package_type" },
     { key: "storage_category_id", label: "Storage Category", type: "ref", hint: "stock.storage.category" },
+    { key: "storage_strategy", label: "Storage Strategy", type: "select", options: [
+      { value: "manual_no_strategy", label: "Manual (no auto)" },
+      { value: "closest_location", label: "Closest location" },
+      { value: "least_packages", label: "Least packages" },
+    ]},
     { key: "location_in_id", label: "When arriving in", type: "m2o", source: "location" },
     { key: "location_out_id", label: "Store to sublocation", type: "ref", hint: "stock.location (full path)" },
     { key: "sublocation", label: "Sub-location strategy", type: "select", options: [
@@ -771,22 +776,36 @@ const PutawayPanel = ({ locationId, locationLabel, rules, onUpdate, onAdd, onDel
           <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 11, color: T.textDim }}>No putaway rules for this location yet.</div>
         )}
         {locRules.map(rule => (
-          <div key={rule.id} style={{ display: "flex", alignItems: "center", padding: "6px 16px", gap: 6, borderBottom: `1px solid ${T.border}08` }}
+          <div key={rule.id} style={{ padding: "6px 16px", borderBottom: `1px solid ${T.border}08` }}
             onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            <input type="number" value={rule.sequence} onChange={e => onUpdate(rule.id, { sequence: parseInt(e.target.value) || 0 })}
-              style={{ width: 28, padding: "3px 4px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 3, color: T.violet, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", outline: "none", textAlign: "center", boxSizing: "border-box" }} />
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-              <input type="text" value={rule.product} placeholder="Product" onChange={e => onUpdate(rule.id, { product: e.target.value })}
-                style={{ width: "100%", padding: "2px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 10, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-              <input type="text" value={rule.category} placeholder="Category" onChange={e => onUpdate(rule.id, { category: e.target.value })}
-                style={{ width: "100%", padding: "2px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.textSoft, fontSize: 9, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="number" value={rule.sequence} onChange={e => onUpdate(rule.id, { sequence: parseInt(e.target.value) || 0 })}
+                style={{ width: 28, padding: "3px 4px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 3, color: T.violet, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", outline: "none", textAlign: "center", boxSizing: "border-box" }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+                <input type="text" value={rule.product} placeholder="Product" onChange={e => onUpdate(rule.id, { product: e.target.value })}
+                  style={{ width: "100%", padding: "2px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 10, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                <input type="text" value={rule.category} placeholder="Category" onChange={e => onUpdate(rule.id, { category: e.target.value })}
+                  style={{ width: "100%", padding: "2px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.textSoft, fontSize: 9, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <input type="text" value={rule.location_out} placeholder="Sublocation" onChange={e => onUpdate(rule.id, { location_out: e.target.value })}
+                style={{ flex: 1, padding: "3px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+              <button onClick={() => onDelete(rule.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", opacity: 0.4 }}
+                onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0.4}>
+                <SI d={ICONS.delete} size={12} color={T.rose} />
+              </button>
             </div>
-            <input type="text" value={rule.location_out} placeholder="Sublocation" onChange={e => onUpdate(rule.id, { location_out: e.target.value })}
-              style={{ flex: 1, padding: "3px 6px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
-            <button onClick={() => onDelete(rule.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", opacity: 0.4 }}
-              onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0.4}>
-              <SI d={ICONS.delete} size={12} color={T.rose} />
-            </button>
+            <div style={{ display: "grid", gridTemplateColumns: "82px 1fr", gap: 4, marginTop: 4, paddingLeft: 34 }}>
+              <label style={{ fontSize: 9, color: T.textDim, alignSelf: "center", textTransform: "uppercase", letterSpacing: "0.5px" }}>Strategy</label>
+              <select value={rule.storage_strategy || "manual_no_strategy"} onChange={e => onUpdate(rule.id, { storage_strategy: e.target.value })}
+                style={{ background: T.surfaceRaised, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, padding: "2px 4px", borderRadius: 3, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}>
+                <option value="manual_no_strategy">Manual (no auto)</option>
+                <option value="closest_location">Closest location</option>
+                <option value="least_packages">Least packages</option>
+              </select>
+              <label style={{ fontSize: 9, color: T.textDim, alignSelf: "center", textTransform: "uppercase", letterSpacing: "0.5px" }}>Storage cat.</label>
+              <input type="text" value={rule.storage_category_id || ""} placeholder="e.g. Pallet, Bin, Cold" onChange={e => onUpdate(rule.id, { storage_category_id: e.target.value })}
+                style={{ background: "transparent", border: `1px solid ${T.border}`, color: T.text, fontSize: 10, padding: "2px 6px", borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+            </div>
           </div>
         ))}
       </div>
@@ -1035,7 +1054,7 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
 const ApiPanel = ({ data, apiConfig, onClose }) => {
   const [tab, setTab] = useState("fetch");
   const u = apiConfig.url || "https://your-odoo.com", db = apiConfig.db || "your_db", l = apiConfig.username || "admin";
-  const fetchCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"  # Settings → Users → API Keys\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef sr(model, domain=[], fields=[], limit=100):\n    return models.execute_kw(db, uid, api_key, model, 'search_read', [domain], {'fields': fields, 'limit': limit})\n\nwarehouses = sr('stock.warehouse', [], ['name','code','reception_steps','delivery_steps'])\nlocations = sr('stock.location', [('usage','!=','view')], ['complete_name','usage','removal_strategy','barcode'])\npicking_types = sr('stock.picking.type', [], ['name','code','sequence_code','default_location_src_id','default_location_dest_id','create_backorder','reservation_method'])\nroutes = sr('stock.route', [], ['name','active','rule_ids','product_selectable','warehouse_selectable','sale_selectable'])\n\nfor route in routes:\n    if route.get('rule_ids'):\n        rules = sr('stock.rule', [('id','in',route['rule_ids'])], ['name','action','procure_method','location_src_id','location_dest_id','picking_type_id','auto','delay'])\n        for r in rules:\n            src = r.get('location_src_id',[0,''])[1] if isinstance(r.get('location_src_id'),(list,tuple)) else ''\n            dst = r.get('location_dest_id',[0,''])[1] if isinstance(r.get('location_dest_id'),(list,tuple)) else ''\n            print(f"  [{r['action']}] {src} → {dst}")\n\nputaway = sr('stock.putaway.rule', [], ['product_id','category_id','location_in_id','location_out_id','sequence'])\nprint(f"\\nTotal: {len(warehouses)} WH, {len(locations)} loc, {len(picking_types)} ops, {len(routes)} routes, {len(putaway)} putaway")`;
+  const fetchCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"  # Settings → Users → API Keys\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef sr(model, domain=[], fields=[], limit=100):\n    return models.execute_kw(db, uid, api_key, model, 'search_read', [domain], {'fields': fields, 'limit': limit})\n\nwarehouses = sr('stock.warehouse', [], ['name','code','reception_steps','delivery_steps'])\nlocations = sr('stock.location', [('usage','!=','view')], ['complete_name','usage','removal_strategy','barcode','storage_category_id'])\npicking_types = sr('stock.picking.type', [], ['name','code','sequence_code','default_location_src_id','default_location_dest_id','create_backorder','reservation_method'])\nroutes = sr('stock.route', [], ['name','active','rule_ids','product_selectable','warehouse_selectable','sale_selectable'])\n\nfor route in routes:\n    if route.get('rule_ids'):\n        rules = sr('stock.rule', [('id','in',route['rule_ids'])], ['name','action','procure_method','location_src_id','location_dest_id','picking_type_id','auto','delay'])\n        for r in rules:\n            src = r.get('location_src_id',[0,''])[1] if isinstance(r.get('location_src_id'),(list,tuple)) else ''\n            dst = r.get('location_dest_id',[0,''])[1] if isinstance(r.get('location_dest_id'),(list,tuple)) else ''\n            print(f"  [{r['action']}] {src} → {dst}")\n\nputaway = sr('stock.putaway.rule', [], ['product_id','category_id','location_in_id','location_out_id','sequence','storage_category_id','storage_strategy'])\nprint(f"\\nTotal: {len(warehouses)} WH, {len(locations)} loc, {len(picking_types)} ops, {len(routes)} routes, {len(putaway)} putaway")`;
   const writeCode = `import xmlrpc.client\n\nurl = "${u}"\ndb = "${db}"\nusername = "${l}"\napi_key = "YOUR_API_KEY"\n\ncommon = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/common")\nuid = common.authenticate(db, username, api_key, {})\nmodels = xmlrpc.client.ServerProxy(f"{u}/xmlrpc/2/object")\n\ndef write(model, rid, vals):\n    return models.execute_kw(db, uid, api_key, model, 'write', [[rid], vals])\n\ndef create(model, vals):\n    return models.execute_kw(db, uid, api_key, model, 'create', [vals])\n\n# ── Operation Types ──\n${data.operationTypes.map(op => `# ${op.label}: write('stock.picking.type', ID, ${JSON.stringify(op.data)})`).join("\n")}\n\n# ── Routes & Rules ──\n${data.routes.map(r => `# Route: ${r.label}\n# route_id = create('stock.route', ${JSON.stringify(r.data)})\n${r.rules.map(rl => `# create('stock.rule', {**${JSON.stringify(rl.data)}, 'route_id': route_id})`).join("\n")}`).join("\n\n")}`;
   const code = tab === "fetch" ? fetchCode : writeCode;
 
@@ -1643,10 +1662,10 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     sr("stock.warehouse", [], ["name","code","reception_steps","delivery_steps","buy_to_resupply","manufacture_to_resupply"]),
     sr("stock.picking.type", [["active","=",true]], ["name","code","sequence_code","default_location_src_id","default_location_dest_id","create_backorder","reservation_method","use_create_lots","use_existing_lots","show_reserved"]),
     sr("stock.route", [["active","=",true]], ["name","active","product_selectable","product_categ_selectable","warehouse_selectable","sale_selectable","rule_ids"]),
-    sr("stock.putaway.rule", [], ["product_id","category_id","location_in_id","location_out_id","sequence"]),
+    sr("stock.putaway.rule", [], ["product_id","category_id","location_in_id","location_out_id","sequence","storage_category_id","storage_strategy"]),
   ]);
   onProgress("Fetching locations…");
-  const locations = await fetchAll("stock.location", [["usage","!=","view"],["active","=",true]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location"], 500, n => onProgress(`Fetching locations… (${n})`));
+  const locations = await fetchAll("stock.location", [["usage","!=","view"],["active","=",true]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location","storage_category_id"], 500, n => onProgress(`Fetching locations… (${n})`));
   onProgress("Fetching rules…");
   const rules = await fetchAll("stock.rule", [["active","=",true]], ["name","action","procure_method","location_src_id","location_dest_id","picking_type_id","auto","delay","propagate_cancel","route_id"], 500, n => onProgress(`Fetching rules… (${n})`));
 
@@ -1668,7 +1687,7 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
   }
   if (referencedLocIds.size > 0) {
     onProgress(`Fetching ${referencedLocIds.size} missing locations…`);
-    const missingLocs = await sr("stock.location", [["id","in",[...referencedLocIds]]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location"], referencedLocIds.size);
+    const missingLocs = await sr("stock.location", [["id","in",[...referencedLocIds]]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location","storage_category_id"], referencedLocIds.size);
     locations.push(...missingLocs);
     locMap = new Map(locations.map(l => [l.id, `loc-${l.id}`]));
   }
@@ -1689,7 +1708,8 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     data: { complete_name: loc.complete_name, usage: loc.usage,
             removal_strategy: rname(loc.removal_strategy_id) || "fifo", barcode: loc.barcode || "",
             scrap_location: !!loc.scrap_location,
-            replenish_location: !!loc.replenish_location },
+            replenish_location: !!loc.replenish_location,
+            storage_category_id: rname(loc.storage_category_id) || "" },
   }));
 
   // 6. Operation types
@@ -1740,6 +1760,8 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     product: rname(p.product_id),
     category: rname(p.category_id),
     sequence: p.sequence ?? 99,
+    storage_strategy: p.storage_strategy || "manual_no_strategy",
+    storage_category_id: rname(p.storage_category_id) || "",
   }));
 
   const data = { nodes: [...warehouseNodes, ...locationNodes], operationTypes, routes: appRoutes, putawayRules };
@@ -2472,7 +2494,7 @@ export default function App() {
       futureRef.current = [];
       setCanUndo(true);
       setCanRedo(false);
-      return { ...p, putawayRules: [...p.putawayRules, { id: `pa-${ts}`, location_in_id: locId, location_out: "", product: "", category: "", sequence: 99 }] };
+      return { ...p, putawayRules: [...p.putawayRules, { id: `pa-${ts}`, location_in_id: locId, location_out: "", product: "", category: "", sequence: 99, storage_strategy: "manual_no_strategy", storage_category_id: "" }] };
     });
   }, []);
   const putawayDelete = useCallback((ruleId) => {
