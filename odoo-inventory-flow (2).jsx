@@ -112,12 +112,50 @@ function dashFor(border, scale) {
   return undefined;
 }
 
+// ─── DOMAIN PRESETS ─────────────────────────────────────────────────────────
+// Common Odoo domain expressions for push-rule applicability. Each preset is
+// a single condition tuple; the helper UI inserts them comma-joined and offers
+// a "Wrap in [...]" button to turn the result into a valid Odoo domain list.
+const DOMAIN_PRESETS = [
+  {
+    label: "has QC route",
+    description: "Product is on the Quality Control route",
+    expression: "('route_ids.name','ilike','Quality')",
+  },
+  {
+    label: "stock in location",
+    description: "Product has stock in a specific location (edit the value after insert)",
+    expression: "('stock_quant_ids.location_id.complete_name','ilike','WH/Stock')",
+  },
+  {
+    label: "has product tag",
+    description: "Product has a specific tag (edit the tag name after insert)",
+    expression: "('product_tag_ids.name','=','priority')",
+  },
+  {
+    label: "product category",
+    description: "Product belongs to a category (edit name after insert)",
+    expression: "('categ_id.name','=','Electronics')",
+  },
+  {
+    label: "on sale",
+    description: "Product is sellable",
+    expression: "('sale_ok','=',True)",
+  },
+  {
+    label: "is purchasable",
+    description: "Product is purchasable",
+    expression: "('purchase_ok','=',True)",
+  },
+];
+
 // ─── FIELD DEFINITIONS ──────────────────────────────────────────────────────
 // Field types:
 //   text, number, boolean, select (with options)
 //   m2o   { source: 'location'|'warehouse'|'route'|'operation_type' } — dropdown from current data
 //   ref   { hint } — free-text reference to an external Odoo record (product, partner, …)
 //   m2m   { source } — comma-separated tag list
+//   domain_helper — multiline text + preset insert buttons (Odoo domain expression)
 //   group:<name> — section header (no input)
 const fieldDefs = {
   warehouse: [
@@ -287,6 +325,8 @@ const fieldDefs = {
     { key: "group_id", label: "Fixed Group", type: "ref", hint: "procurement.group" },
     { key: "partner_address_id", label: "Delivery Address", type: "ref", hint: "res.partner" },
     { key: "location_dest_from_rule", label: "Take dest from another rule", type: "boolean" },
+    { key: "__group_applicability", type: "group", label: "Applicability" },
+    { key: "domain", label: "Domain", type: "domain_helper", hint: "Odoo domain for push-rule applicability" },
   ],
   putaway_rule: [
     { key: "sequence", label: "Priority", type: "number" },
@@ -934,6 +974,41 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
             input = (
               <input type="text" value={val ?? ""} placeholder={f.hint || ""} onChange={e => setVal(e.target.value)}
                 style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+            );
+          } else if (f.type === "domain_helper") {
+            const presetBtnStyle = { padding: "3px 8px", borderRadius: 4, border: `1px solid ${T.border}`, background: "transparent", color: T.textDim, fontSize: 10, fontFamily: "inherit", cursor: "pointer" };
+            const insertPreset = expr => {
+              const current = (val || "").trim();
+              const next = current ? `${current}, ${expr}` : expr;
+              setVal(next);
+            };
+            const wrapInBrackets = () => {
+              const c = (val || "").trim();
+              if (!c) return;
+              const wrapped = c.startsWith("[") ? c : `[${c}]`;
+              setVal(wrapped);
+            };
+            input = (
+              <div>
+                <textarea value={val || ""} onChange={e => setVal(e.target.value)}
+                  placeholder="[('field','operator','value')]"
+                  rows={3}
+                  style={{ width: "100%", background: T.surfaceRaised, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: 6, borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", resize: "vertical", outline: "none", boxSizing: "border-box" }} />
+                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                  {DOMAIN_PRESETS.map(p => (
+                    <button key={p.label} type="button" title={p.description}
+                      onClick={() => insertPreset(p.expression)}
+                      style={presetBtnStyle}>+ {p.label}</button>
+                  ))}
+                  <span style={{ flex: 1 }} />
+                  <button type="button" title="Wrap the textarea content in [...] to form a valid Odoo domain list"
+                    onClick={wrapInBrackets}
+                    style={{ ...presetBtnStyle, color: T.accent, borderColor: T.accent + "55" }}>Wrap in [...]</button>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 9, color: T.textDim, lineHeight: 1.4 }}>
+                  Push-rule domain. Odoo evaluates this against the moving product. Multiple conditions: AND-joined.
+                </div>
+              </div>
             );
           } else {
             input = (
