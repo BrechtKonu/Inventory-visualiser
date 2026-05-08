@@ -178,4 +178,29 @@ it('manufacture pbm_sam: Post-Production rule is auto=transparent push', () => {
   assert.equal(last.data.propagate_cancel, true);
 });
 
+// ── buy ─────────────────────────────────────
+
+it('buy_to_resupply=false produces no buy entities', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags, buy_to_resupply: false } }));
+  assert.equal(r.addRoutes.filter(rt => rt.__autoGen?.source === 'buy').length, 0);
+});
+
+it('buy with reception_steps=one_step → Vendors → Stock buy rule', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags,
+    buy_to_resupply: true, reception_steps: 'one_step' } }));
+  const buy = r.addRoutes.find(rt => rt.__autoGen?.source === 'buy');
+  assert.ok(buy);
+  assert.equal(buy.rules.length, 1);
+  assert.equal(buy.rules[0].action, 'buy');
+  assert.equal(buy.rules[0].src_location_id, 'loc-vendors');
+  assert.equal(buy.rules[0].dest_location_id, 'wh1-stock');
+});
+
+it('buy with reception_steps=three_steps → Vendors → Input buy rule', () => {
+  const r = presetGenerator(ctx({ flags: { ...ctx().flags,
+    buy_to_resupply: true, reception_steps: 'three_steps' } }));
+  const buy = r.addRoutes.find(rt => rt.__autoGen?.source === 'buy');
+  assert.equal(buy.rules[0].dest_location_id, 'wh1-input');
+});
+
 await flush();

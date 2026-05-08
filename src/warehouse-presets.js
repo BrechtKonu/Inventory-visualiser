@@ -55,6 +55,12 @@ export function presetGenerator(input) {
     out.addOperationTypes.push(...r.addOperationTypes);
     out.addRoutes.push(...r.addRoutes);
   }
+  if (input.flags?.buy_to_resupply) {
+    const r = _genBuy(input, ctx);
+    out.addNodes.push(...r.addNodes);
+    out.addOperationTypes.push(...r.addOperationTypes);
+    out.addRoutes.push(...r.addRoutes);
+  }
   return out;
 }
 
@@ -227,6 +233,26 @@ function _genManufacture(input, ctx) {
         _internal._rule(`${wid}-rl-mfg-3`, 'Production → Stock', 'push', 'make_to_stock',
           prodId, stockId, opS.id, pushAuto, 0, tag, isSam),
       ], { product_selectable: true, product_categ_selectable: true }, tag),
+    ],
+  };
+}
+
+function _genBuy(input, ctx) {
+  const { warehouseId: wid, flags } = input;
+  if (!flags.buy_to_resupply) return { addNodes: [], addOperationTypes: [], addRoutes: [] };
+  const tag = _internal._autoTag(wid, 'buy');
+  // Route color offset: reception=+0, delivery=+1, manufacture=+2, buy=+4, resupply=+5+idx.
+  const colorIdx = ctx.routeColorBase + 4;
+  const dstId = flags.reception_steps === 'one_step' ? ctx.stockId : `${wid}-input`;
+  const opReceiptId = `${wid}-op-receipt`;
+  return {
+    addNodes: [],
+    addOperationTypes: [],
+    addRoutes: [
+      _internal._route(`${wid}-route-buy`, `Buy`, colorIdx, [
+        _internal._rule(`${wid}-rl-buy`, 'Buy', 'buy', 'make_to_order',
+          ctx.vendorsId, dstId, opReceiptId, 'manual', 3, tag),
+      ], { warehouse_selectable: true }, tag),
     ],
   };
 }
