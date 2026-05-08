@@ -3,7 +3,7 @@
 // Proprietary — use governed by the LICENSE file in the project root.
 
 import React, { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import { presetGenerator } from "./src/warehouse-presets.js";
+import { presetGenerator, presetDiff } from "./src/warehouse-presets.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
 const DARK_THEME = {
@@ -1030,6 +1030,75 @@ const CfgModal = ({ cfg, onChange, onClose }) => {
   );
 };
 
+// ─── SHRINK DIALOG (Plan B) ─────────────────────────────────────────────
+// Shown when an edit on a wizard-managed warehouse flag would orphan
+// existing __autoGen-tagged entities. Three resolutions: cancel, delete
+// the orphans, or keep them but mark them inactive.
+const ShrinkDialog = ({ diff, warehouse, fieldLabel, oldValue, newValue, onCancel, onDelete, onDeactivate }) => {
+  const orphanCount = diff.toRemove.nodeIds.length + diff.toRemove.opTypeIds.length + diff.toRemove.routeIds.length;
+  const hasExternalRefs = diff.externalRefs.length > 0;
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onCancel}>
+      <div style={{ width: 540, maxHeight: "85vh", background: T.surface, border: `1px solid ${T.amber}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, background: T.amberSoft, color: T.amber, fontSize: 13, fontWeight: 700 }}>
+          ⚠ Reducing {fieldLabel} {String(oldValue)} → {String(newValue)} on {warehouse.label}
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16, fontSize: 11, color: T.text }}>
+          <div style={{ marginBottom: 10 }}>This will orphan {orphanCount} entit{orphanCount === 1 ? 'y' : 'ies'}:</div>
+          {diff.toRemove.nodeIds.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: T.textDim, marginBottom: 2 }}>Locations:</div>
+              <div style={{ paddingLeft: 12, color: T.text, fontFamily: "'IBM Plex Mono', monospace" }}>{diff.toRemove.nodeIds.join(', ')}</div>
+            </div>
+          )}
+          {diff.toRemove.opTypeIds.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: T.textDim, marginBottom: 2 }}>Operation types:</div>
+              <div style={{ paddingLeft: 12, color: T.text, fontFamily: "'IBM Plex Mono', monospace" }}>{diff.toRemove.opTypeIds.join(', ')}</div>
+            </div>
+          )}
+          {diff.toRemove.routeIds.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: T.textDim, marginBottom: 2 }}>Routes ({diff.toRemove.ruleIds.length} rules):</div>
+              <div style={{ paddingLeft: 12, color: T.text, fontFamily: "'IBM Plex Mono', monospace" }}>{diff.toRemove.routeIds.join(', ')}</div>
+            </div>
+          )}
+          {diff.toRemove.putawayRuleIds.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: T.textDim, marginBottom: 2 }}>Putaway rules:</div>
+              <div style={{ paddingLeft: 12, color: T.text }}>{diff.toRemove.putawayRuleIds.length}</div>
+            </div>
+          )}
+          {hasExternalRefs && (
+            <div style={{ marginTop: 12, padding: 10, background: T.amberSoft, borderRadius: 4, border: `1px solid ${T.amber}` }}>
+              <div style={{ color: T.amber, fontWeight: 700, marginBottom: 6 }}>⚠ External references at risk:</div>
+              {diff.externalRefs.map((er, i) => (
+                <div key={i} style={{ marginBottom: 6 }}>
+                  <div style={{ color: T.text }}>{er.orphanLabel}:</div>
+                  {er.referencedBy.map((ref, j) => (
+                    <div key={j} style={{ paddingLeft: 12, color: T.textDim, fontSize: 10 }}>
+                      {ref.kind} {ref.label}{ref.routeLabel ? ` (in ${ref.routeLabel})` : ''}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <div style={{ marginTop: 6, fontSize: 10, color: T.textDim }}>
+                Choosing Delete will leave these references dangling (visual error in the canvas).
+                Choose Deactivate to keep them resolvable.
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn variant="ghost" small onClick={onCancel}>Cancel</Btn>
+          <Btn variant="ghost" small onClick={onDeactivate}>Keep but deactivate</Btn>
+          <Btn variant="primary" small onClick={onDelete}>Delete orphans</Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── WAREHOUSE PRESET WIZARD ────────────────────────────────────────────
 const WizardModal = ({ existingNodes, onClose, onSkip, onCreate }) => {
   const ordinals = ['Main', 'Secondary', 'Tertiary', 'Quaternary', 'Quinary'];
@@ -2024,6 +2093,8 @@ export default function App() {
   const [showCfg, setShowCfg] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [shrinkPending, setShrinkPending] = useState(null); // { diff, warehouse, fieldLabel, oldValue, newValue, warehouseId, fieldKey }
+  const [showInactive, setShowInactive] = useState(false);
   const [showApi, setShowApi] = useState(false);
   const [apiCfg, setApiCfg] = useState(() => KONU_CFG
     ? { url: KONU_CFG.baseUrl || "", db: KONU_CFG.dbName || "", username: "konu", apiKey: "konu" }
@@ -3231,6 +3302,100 @@ export default function App() {
     setTimeout(() => { autoLayout(); fitToContent(); }, 50);
   }, [autoLayout, fitToContent]);
 
+  // Plan B: when an edit on a wizard-managed warehouse flag is detected,
+  // either apply directly (pure grow) or stage a confirmation dialog.
+  // Returns true if the edit was intercepted (caller should NOT call doUpdate).
+  const tryWarehouseFlagEdit = useCallback((warehouseId, fieldKey, newValue) => {
+    const wh = data.nodes.find(n => n.type === 'warehouse' && n.id === warehouseId);
+    if (!wh) return false;
+    const currentFlags = wh.data || {};
+    const newFlags = {
+      reception_steps: currentFlags.reception_steps || 'one_step',
+      delivery_steps: currentFlags.delivery_steps || 'ship_only',
+      manufacture_to_resupply: !!currentFlags.manufacture_to_resupply,
+      manufacture_steps: currentFlags.manufacture_steps || 'mrp_one_step',
+      buy_to_resupply: !!currentFlags.buy_to_resupply,
+      resupply_wh_ids: Array.isArray(currentFlags.resupply_wh_ids) ? currentFlags.resupply_wh_ids : [],
+      [fieldKey]: newValue,
+    };
+    const diff = presetDiff(data, warehouseId, newFlags, currentFlags.code || 'WH', wh.label || currentFlags.name || 'Warehouse');
+    const nothingToRemove =
+      diff.toRemove.nodeIds.length === 0 &&
+      diff.toRemove.opTypeIds.length === 0 &&
+      diff.toRemove.routeIds.length === 0;
+    if (nothingToRemove) {
+      // Pure grow: apply directly (with undo)
+      setData(p => {
+        historyRef.current = [...historyRef.current.slice(-49), p];
+        futureRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+        const updatedNodes = p.nodes.map(n =>
+          n.id === warehouseId ? { ...n, data: { ...n.data, [fieldKey]: newValue } } : n);
+        return {
+          ...p,
+          nodes: [...updatedNodes, ...diff.toAdd.nodes],
+          operationTypes: [...p.operationTypes, ...diff.toAdd.operationTypes],
+          routes: [...p.routes, ...diff.toAdd.routes],
+        };
+      });
+      setTimeout(() => { autoLayout(); fitToContent(); }, 50);
+      return true;
+    }
+    // Shrink path: stage confirmation
+    setShrinkPending({
+      diff,
+      warehouse: wh,
+      fieldLabel: fieldKey,
+      oldValue: currentFlags[fieldKey],
+      newValue,
+      warehouseId,
+      fieldKey,
+    });
+    return true;
+  }, [data, autoLayout, fitToContent]);
+
+  const applyShrinkResolve = useCallback((mode) => {
+    if (!shrinkPending) return;
+    const { diff, warehouseId, fieldKey, newValue } = shrinkPending;
+    const removeNodes = new Set(diff.toRemove.nodeIds);
+    const removeOps = new Set(diff.toRemove.opTypeIds);
+    const removeRoutes = new Set(diff.toRemove.routeIds);
+    const removePutaway = new Set(diff.toRemove.putawayRuleIds);
+    setData(p => {
+      historyRef.current = [...historyRef.current.slice(-49), p];
+      futureRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+      const flagPatch = (n) => n.id === warehouseId
+        ? { ...n, data: { ...n.data, [fieldKey]: newValue } }
+        : n;
+      if (mode === 'delete') {
+        return {
+          ...p,
+          nodes: p.nodes.filter(n => !removeNodes.has(n.id)).map(flagPatch).concat(diff.toAdd.nodes),
+          operationTypes: p.operationTypes.filter(o => !removeOps.has(o.id)).concat(diff.toAdd.operationTypes),
+          routes: p.routes.filter(rt => !removeRoutes.has(rt.id)).concat(diff.toAdd.routes),
+          putawayRules: (p.putawayRules || []).filter(pr => !removePutaway.has(pr.id)),
+        };
+      }
+      // 'deactivate' — flag entities as inactive but keep them
+      const markInactive = (e) => ({
+        ...e,
+        data: { ...e.data, active: false },
+        __autoGen: { ...(e.__autoGen || {}), deactivated: true },
+      });
+      return {
+        ...p,
+        nodes: p.nodes.map(n => removeNodes.has(n.id) ? markInactive(n) : flagPatch(n)).concat(diff.toAdd.nodes),
+        operationTypes: p.operationTypes.map(o => removeOps.has(o.id) ? markInactive(o) : o).concat(diff.toAdd.operationTypes),
+        routes: p.routes.map(rt => removeRoutes.has(rt.id) ? markInactive(rt) : rt).concat(diff.toAdd.routes),
+      };
+    });
+    setShrinkPending(null);
+    setTimeout(() => { autoLayout(); fitToContent(); }, 50);
+  }, [shrinkPending, autoLayout, fitToContent]);
+
   const handleFetchFromOdoo = useCallback(async () => {
     if (!apiCfg.url || !apiCfg.db || !apiCfg.username || !apiCfg.apiKey) {
       setShowCfg(true); // prompt user to fill in credentials
@@ -4313,7 +4478,29 @@ export default function App() {
         </div>
 
         {/* PROPERTY PANEL */}
-        {sel && !putawayLoc && <PropPanel sel={sel} data={data} onUpdate={doUpdate} onClose={() => setSel(null)} onDelete={doDelete} onSaveToOdoo={saveItemToOdoo} hasOdooSession={!!fetchedSnapshot} />}
+        {sel && !putawayLoc && <PropPanel sel={sel} data={data}
+          onUpdate={(type, id, upd) => {
+            // Plan B: intercept wizard-managed warehouse flag edits.
+            const WIZARD_FLAGS = ['reception_steps','delivery_steps','manufacture_to_resupply','manufacture_steps','buy_to_resupply','resupply_wh_ids'];
+            if (type === 'warehouse' && upd && upd.data) {
+              const item = data.nodes.find(n => n.id === id);
+              const oldData = item?.data || {};
+              const flagKey = WIZARD_FLAGS.find(k => k in upd.data && upd.data[k] !== oldData[k]);
+              if (flagKey && tryWarehouseFlagEdit(id, flagKey, upd.data[flagKey])) {
+                // Apply any other (non-wizard) data field edits via the normal path,
+                // stripping the wizard flag key out of upd so it isn't double-applied.
+                const otherKeys = Object.keys(upd.data).filter(k => k !== flagKey);
+                if (otherKeys.length) {
+                  const restData = {};
+                  for (const k of otherKeys) restData[k] = upd.data[k];
+                  doUpdate(type, id, { data: { ...oldData, ...restData } });
+                }
+                return;
+              }
+            }
+            doUpdate(type, id, upd);
+          }}
+          onClose={() => setSel(null)} onDelete={doDelete} onSaveToOdoo={saveItemToOdoo} hasOdooSession={!!fetchedSnapshot} />}
 
         {/* PUTAWAY PANEL */}
         {putawayLoc && (() => {
@@ -4437,6 +4624,16 @@ export default function App() {
           setShowWizard(false);
           mergeWizardOutput(payload);
         }}
+      />}
+      {shrinkPending && <ShrinkDialog
+        diff={shrinkPending.diff}
+        warehouse={shrinkPending.warehouse}
+        fieldLabel={shrinkPending.fieldLabel}
+        oldValue={shrinkPending.oldValue}
+        newValue={shrinkPending.newValue}
+        onCancel={() => setShrinkPending(null)}
+        onDelete={() => applyShrinkResolve('delete')}
+        onDeactivate={() => applyShrinkResolve('deactivate')}
       />}
       {showApi && <ApiPanel data={data} apiConfig={apiCfg} onClose={() => setShowApi(false)} />}
       {showPushModal && <PushModal changes={showPushModal} onConfirm={executePush} onCancel={() => setShowPushModal(null)} />}
