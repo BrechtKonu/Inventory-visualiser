@@ -8,7 +8,8 @@
   "scripts": {
     "build": "node scripts/build-standalone.mjs",
     "build:module": "node scripts/build-standalone.mjs",
-    "proxy": "node scripts/proxy-server.mjs"
+    "proxy": "node scripts/proxy-server.mjs",
+    "test:presets": "node src/warehouse-presets.test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
