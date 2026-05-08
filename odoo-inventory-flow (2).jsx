@@ -2609,58 +2609,64 @@ export default function App() {
         }
       }
 
-      // ── Initial position assignment ──────────────────────────────────────
+      // ── Position assignment (left → right, each tier anchored on avg of predecessors)
+      // Within a tier, nodes get equal vertical spacing in barycenter-sorted order.
+      // The tier's vertical *center* is the avg y of all incoming-neighbor predecessors.
+      // First tier is fixed. This guarantees a clean per-tier grid plus a flowing diagonal.
       const pos = {};
-      for (const t of tiers) {
+      for (let i = 0; i < tiers.length; i++) {
+        const t = tiers[i];
         const ids = byTier.get(t);
-        ids.forEach((id, i) => {
-          pos[id] = {
-            x: PAD_X + (t - tiers[0]) * COL_W,
-            y: PAD_Y + i * ROW_H,
-          };
+        const totalH = (ids.length - 1) * ROW_H;
+        let mid;
+        if (i === 0) {
+          mid = PAD_Y + totalH / 2;
+        } else {
+          const predYs = [];
+          for (const id of ids) for (const pred of adjB[id]) if (pos[pred]) predYs.push(pos[pred].y);
+          mid = predYs.length ? avg(predYs) : (PAD_Y + totalH / 2);
+        }
+        const x = PAD_X + (t - tiers[0]) * COL_W;
+        ids.forEach((id, j) => {
+          pos[id] = { x, y: mid - totalH / 2 + j * ROW_H };
         });
       }
 
-      // ── Vertical relaxation ──────────────────────────────────────────────
-      // Each node tries to align to the average y of its neighbors (both fwd & bwd),
-      // with a hard min-gap to prevent overlap. Anchors: suppliers and customers
-      // get pulled to canvas extremes (left supplier, bottom-right customer)
-      // for the diagonal flow Brecht's reference layout shows.
-      const minGap = 90; // min vertical distance between two nodes in same tier
-      for (let it = 0; it < RELAX_ITER; it++) {
-        // Compute targets
-        const targets = {};
-        for (const id of nodeIds) {
-          const fwd = adjF[id].map(n => pos[n]?.y).filter(v => v !== undefined);
-          const bwd = adjB[id].map(n => pos[n]?.y).filter(v => v !== undefined);
-          const all = [...fwd, ...bwd];
-          targets[id] = all.length ? avg(all) : pos[id].y;
-        }
-        // Apply
-        for (const id of nodeIds) {
-          pos[id].y += (targets[id] - pos[id].y) * RELAX_STEP;
-        }
-        // Resolve overlaps within each tier
-        for (const t of tiers) {
-          const ids = [...byTier.get(t)].sort((a, b) => pos[a].y - pos[b].y);
-          for (let i = 1; i < ids.length; i++) {
-            const prev = pos[ids[i - 1]].y;
-            if (pos[ids[i]].y < prev + minGap) pos[ids[i]].y = prev + minGap;
+      // ── Customer / supplier / inventory anchors ──────────────────────────
+      // The diagonal feel Brecht's manual layout achieves: vendors top-left,
+      // customers bottom-right. We bump the customer tier downward and the
+      // supplier tier slightly upward.
+      const internalYs = flowNodes
+        .filter(n => !isCustomer(n.id) && !isSupplier(n.id) && !isInventory(n.id))
+        .map(n => pos[n.id]?.y).filter(v => v !== undefined);
+      const yMin = internalYs.length ? Math.min(...internalYs) : 200;
+      const yMax = internalYs.length ? Math.max(...internalYs) : 600;
+      const range = Math.max(400, yMax - yMin);
+      // Multiple suppliers / customers share the same target y plus per-rank stagger.
+      const supList = flowNodes.filter(n => isSupplier(n.id));
+      supList.forEach((n, k) => { pos[n.id].y = yMin - 60 + k * ROW_H; });
+      const custList = flowNodes.filter(n => isCustomer(n.id));
+      custList.forEach((n, k) => { pos[n.id].y = yMax + 100 + k * ROW_H; });
+      const invList = flowNodes.filter(n => isInventory(n.id));
+      invList.forEach((n, k) => { pos[n.id].y = yMax + 200 + k * ROW_H; });
+      // Last sanity: ensure no two nodes overlap (anywhere on the canvas, post-anchor)
+      const positioned = [...nodeIds].map(id => ({ id, ...pos[id] }));
+      const minGap = 90;
+      // Group by approximate column (x within ±20 = same tier visually)
+      const byX = new Map();
+      for (const item of positioned) {
+        const key = Math.round(item.x / 10) * 10;
+        if (!byX.has(key)) byX.set(key, []);
+        byX.get(key).push(item);
+      }
+      for (const arr of byX.values()) {
+        arr.sort((a, b) => a.y - b.y);
+        for (let k = 1; k < arr.length; k++) {
+          if (arr[k].y < arr[k - 1].y + minGap) {
+            arr[k].y = arr[k - 1].y + minGap;
+            pos[arr[k].id].y = arr[k].y;
           }
         }
-      }
-
-      // ── Customer pull: bottom-right (Brecht's reference layout)  ─────────
-      // Drop customer tier slightly lower than the main flow's bottom for
-      // the characteristic top-left → bottom-right diagonal feel.
-      const allYs = Object.values(pos).map(p => p.y);
-      const yMin = allYs.length ? Math.min(...allYs) : 0;
-      const yMax = allYs.length ? Math.max(...allYs) : 0;
-      const range = Math.max(400, yMax - yMin);
-      for (const n of flowNodes) {
-        if (isCustomer(n.id))   pos[n.id].y = yMin + range * 0.85;
-        if (isSupplier(n.id))   pos[n.id].y = yMin + range * 0.30;
-        if (isInventory(n.id))  pos[n.id].y = yMax + 60;
       }
 
       // ── Warehouses: nudged onto a tag-friendly position ──────────────────
