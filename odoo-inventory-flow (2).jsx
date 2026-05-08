@@ -2503,12 +2503,11 @@ export default function App() {
       setCanRedo(false);
 
       // ── Tunables ─────────────────────────────────────────────────────────
-      const COL_W = 320;          // horizontal tier spacing
-      const ROW_H = 110;          // vertical row spacing
-      const PAD_X = 80, PAD_Y = 200; // canvas-edge padding
+      const COL_W = 290;          // horizontal tier spacing
+      const ROW_H = 100;          // vertical row spacing within a tier
+      const DIAG_DROP = 55;       // vertical drift per tier (guarantees diagonal flow)
+      const PAD_X = 80, PAD_Y = 220; // canvas-edge padding
       const BC_ITER = 12;         // barycenter passes (Sugiyama crossing reduction)
-      const RELAX_ITER = 30;      // post-tier vertical relaxation
-      const RELAX_STEP = 0.35;    // how much each pass moves a node toward its target
 
       // ── Visibility filter ────────────────────────────────────────────────
       const usedIds = new Set();
@@ -2609,22 +2608,25 @@ export default function App() {
         }
       }
 
-      // ── Position assignment (left → right, each tier anchored on avg of predecessors)
-      // Within a tier, nodes get equal vertical spacing in barycenter-sorted order.
-      // The tier's vertical *center* is the avg y of all incoming-neighbor predecessors.
-      // First tier is fixed. This guarantees a clean per-tier grid plus a flowing diagonal.
+      // ── Position assignment ──────────────────────────────────────────────
+      // For each tier (left → right):
+      //   tier center y = blend( avg(predecessor y),  baseline + tier_index * DIAG_DROP )
+      // The DIAG_DROP component guarantees a real diagonal even on linear chains
+      // where every tier has just one incoming neighbor (avg-of-predecessor = predecessor.y
+      // and would otherwise leave all tiers at the same y).
+      // Within a tier, nodes get equal ROW_H spacing in barycenter-sorted order.
       const pos = {};
+      const baselineY = PAD_Y;
       for (let i = 0; i < tiers.length; i++) {
         const t = tiers[i];
         const ids = byTier.get(t);
         const totalH = (ids.length - 1) * ROW_H;
-        let mid;
-        if (i === 0) {
-          mid = PAD_Y + totalH / 2;
-        } else {
+        const baseline = baselineY + i * DIAG_DROP;
+        let mid = baseline;
+        if (i > 0) {
           const predYs = [];
           for (const id of ids) for (const pred of adjB[id]) if (pos[pred]) predYs.push(pos[pred].y);
-          mid = predYs.length ? avg(predYs) : (PAD_Y + totalH / 2);
+          if (predYs.length) mid = avg(predYs) * 0.5 + baseline * 0.5; // blend predecessor pull with diagonal drift
         }
         const x = PAD_X + (t - tiers[0]) * COL_W;
         ids.forEach((id, j) => {
