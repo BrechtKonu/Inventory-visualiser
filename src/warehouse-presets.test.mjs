@@ -315,4 +315,94 @@ it('orchestrator: warehouse node carries the flags as its data', () => {
   assert.equal(wh.data.buy_to_resupply, true);
 });
 
+// ── presetDiff (Plan B) ─────────────────────────────────────
+
+import { presetDiff } from './warehouse-presets.js';
+
+const sampleData = (overrides = {}) => {
+  // Generate a 3-step receive warehouse, then represent it as data
+  const r = presetGenerator({
+    warehouseId: 'wh1', warehouseCode: 'WH', warehouseName: 'Main',
+    flags: { reception_steps: 'three_steps', delivery_steps: 'ship_only',
+             manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+             buy_to_resupply: false, resupply_wh_ids: [] },
+    existingNodes: [],
+  });
+  return {
+    nodes: r.addNodes,
+    operationTypes: r.addOperationTypes,
+    routes: r.addRoutes,
+    putawayRules: [],
+    ...overrides,
+  };
+};
+
+it('presetDiff: shrink reception 3→1 marks Input + QC for removal', () => {
+  const data = sampleData();
+  const diff = presetDiff(data, 'wh1',
+    { reception_steps: 'one_step', delivery_steps: 'ship_only',
+      manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+      buy_to_resupply: false, resupply_wh_ids: [] },
+    'WH', 'Main');
+  // Locations Input + QC orphaned
+  const removedLabels = diff.toRemove.nodeIds
+    .map(id => data.nodes.find(n => n.id === id)?.label).sort();
+  assert.deepEqual(removedLabels, ['WH/Input', 'WH/Quality Control']);
+  // The receive route (3 rules) is orphaned
+  assert.equal(diff.toRemove.routeIds.length, 1);
+  assert.equal(diff.toRemove.ruleIds.length, 3);
+  // No external refs in this clean shrink
+  assert.equal(diff.externalRefs.length, 0);
+});
+
+it('presetDiff: shrink reception 3→1 with external rule referencing Input → externalRefs populated', () => {
+  const data = sampleData();
+  // Add a manual rule on a separate route that points at WH/Input
+  data.routes.push({
+    id: 'manual-route', label: 'Manual route', colorIdx: 7,
+    data: { name: 'Manual route', active: true, product_selectable: false,
+            product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false },
+    rules: [{ id: 'manual-rl', label: 'External ref to Input',
+              action: 'pull', procure_method: 'make_to_order',
+              src_location_id: 'wh1-input', dest_location_id: 'wh1-stock',
+              picking_type_id: 'op-other', auto: 'manual',
+              data: { name: 'External ref to Input', action: 'pull',
+                      procure_method: 'make_to_order', auto: 'manual',
+                      propagate_cancel: false, delay: 0 } }],
+  });
+  const diff = presetDiff(data, 'wh1',
+    { reception_steps: 'one_step', delivery_steps: 'ship_only',
+      manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+      buy_to_resupply: false, resupply_wh_ids: [] },
+    'WH', 'Main');
+  assert.equal(diff.externalRefs.length, 1);
+  assert.equal(diff.externalRefs[0].orphanLabel, 'WH/Input');
+  assert.equal(diff.externalRefs[0].referencedBy[0].id, 'manual-rl');
+});
+
+it('presetDiff: pure grow (1→3) → toAdd populated, toRemove empty', () => {
+  const data1Step = (() => {
+    const r = presetGenerator({
+      warehouseId: 'wh1', warehouseCode: 'WH', warehouseName: 'Main',
+      flags: { reception_steps: 'one_step', delivery_steps: 'ship_only',
+               manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+               buy_to_resupply: false, resupply_wh_ids: [] },
+      existingNodes: [],
+    });
+    return { nodes: r.addNodes, operationTypes: r.addOperationTypes, routes: r.addRoutes, putawayRules: [] };
+  })();
+  const diff = presetDiff(data1Step, 'wh1',
+    { reception_steps: 'three_steps', delivery_steps: 'ship_only',
+      manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+      buy_to_resupply: false, resupply_wh_ids: [] },
+    'WH', 'Main');
+  // 2 new locations (Input + QC) + 2 new op-types (QC, Storage; Receipts is replaced) + 1 new route
+  assert.equal(diff.toAdd.nodes.length, 2);
+  assert.ok(diff.toAdd.routes.length >= 1);
+  // Receipts op-type id is the same in both flag states, so toAdd should NOT contain it
+  assert.equal(diff.toAdd.operationTypes.filter(o => o.label === 'Receipts').length, 0);
+  // Remove should be empty (Receipts changes its dest but the id stays)
+  assert.deepEqual(diff.toRemove.nodeIds, []);
+});
+
 await flush();

@@ -354,6 +354,143 @@ function _genResupply(input, ctx) {
   return out;
 }
 
+// presetDiff(currentData, warehouseId, newFlags, warehouseCode, warehouseName) → {
+//   toAdd: { nodes, operationTypes, routes },
+//   toRemove: { nodeIds, opTypeIds, routeIds, ruleIds, putawayRuleIds },
+//   externalRefs: [{ orphanId, orphanLabel, referencedBy: [{ kind, id, label }] }]
+// }
+//
+// Computes the difference between the warehouse's currently-existing
+// __autoGen-tagged entities and what presetGenerator would produce for the
+// new flags. Identity-tagged entities are NEVER orphaned (they exist as
+// long as the warehouse exists). Resupply-related source-side OUT op-types
+// (tagged `resupply:<warehouseId>` on a *different* warehouseId) are also
+// considered owned for this warehouse's edit.
+export function presetDiff(currentData, warehouseId, newFlags, warehouseCode, warehouseName) {
+  // 1. Compute the desired output via presetGenerator.
+  const desired = presetGenerator({
+    warehouseId,
+    warehouseCode,
+    warehouseName,
+    flags: newFlags,
+    existingNodes: currentData.nodes,
+  });
+
+  // 2. Find currently-existing entities tagged for this warehouse, except identity.
+  const ownedNodes = currentData.nodes.filter(n =>
+    n.__autoGen?.warehouseId === warehouseId &&
+    n.__autoGen?.source !== 'identity');
+  const ownedOps = currentData.operationTypes.filter(o =>
+    o.__autoGen?.warehouseId === warehouseId &&
+    o.__autoGen?.source !== 'identity');
+  const ownedRoutes = currentData.routes.filter(rt =>
+    rt.__autoGen?.warehouseId === warehouseId &&
+    rt.__autoGen?.source !== 'identity');
+
+  // 3. For two-sided resupply: include source-side OUT op-types where
+  //    source = 'resupply:<warehouseId>'. These belong to a different
+  //    warehouse but are managed by this warehouse's resupply config.
+  const sourceSideOps = currentData.operationTypes.filter(o =>
+    o.__autoGen?.source === `resupply:${warehouseId}`);
+
+  // 4. Build sets of desired ids.
+  const desiredNodeIds = new Set(desired.addNodes.map(n => n.id));
+  const desiredOpIds = new Set(desired.addOperationTypes.map(o => o.id));
+  const desiredRouteIds = new Set(desired.addRoutes.map(rt => rt.id));
+
+  // 5. Owned but not desired = orphan (toRemove).
+  const removeNodeIds = ownedNodes
+    .filter(n => !desiredNodeIds.has(n.id))
+    .map(n => n.id);
+  const allOwnedOps = [...ownedOps, ...sourceSideOps];
+  const removeOpIds = allOwnedOps
+    .filter(o => !desiredOpIds.has(o.id))
+    .map(o => o.id);
+  const removeRouteIds = ownedRoutes
+    .filter(rt => !desiredRouteIds.has(rt.id))
+    .map(rt => rt.id);
+
+  // Rule ids inside removed routes
+  const removeRuleIds = [];
+  for (const rt of ownedRoutes) {
+    if (removeRouteIds.includes(rt.id)) {
+      removeRuleIds.push(...rt.rules.map(r => r.id));
+    }
+  }
+
+  // Putaway rules referencing about-to-be-removed locations
+  const removeNodeIdSet = new Set(removeNodeIds);
+  const removePutawayRuleIds = (currentData.putawayRules || [])
+    .filter(pr => removeNodeIdSet.has(pr.location_in_id))
+    .map(pr => pr.id);
+
+  // 6. ToAdd = desired but not currently owned and not currently on the canvas.
+  const ownedNodeIds = new Set(ownedNodes.map(n => n.id));
+  const ownedOpIds = new Set(allOwnedOps.map(o => o.id));
+  const ownedRouteIds = new Set(ownedRoutes.map(rt => rt.id));
+  const toAddNodes = desired.addNodes.filter(n =>
+    !ownedNodeIds.has(n.id) &&
+    !currentData.nodes.some(cn => cn.id === n.id));
+  const toAddOps = desired.addOperationTypes.filter(o =>
+    !ownedOpIds.has(o.id) &&
+    !currentData.operationTypes.some(co => co.id === o.id));
+  const toAddRoutes = desired.addRoutes.filter(rt =>
+    !ownedRouteIds.has(rt.id) &&
+    !currentData.routes.some(crt => crt.id === rt.id));
+
+  // 7. External refs — find rules / op-types NOT being removed AND not
+  //    being updated in place (same id appears in desired) that reference
+  //    an about-to-be-removed location. Entities whose ids are preserved
+  //    across the diff are considered "updated in place" — their old src/dst
+  //    are stale and the desired version supersedes them.
+  const externalRefs = [];
+  for (const orphanId of removeNodeIds) {
+    const orphan = currentData.nodes.find(n => n.id === orphanId);
+    const refs = [];
+    for (const rt of currentData.routes) {
+      if (removeRouteIds.includes(rt.id)) continue;
+      // If this route's id appears in desired, it's being updated in place.
+      if (desiredRouteIds.has(rt.id)) continue;
+      for (const r of rt.rules) {
+        if (r.src_location_id === orphanId || r.dest_location_id === orphanId) {
+          refs.push({ kind: 'rule', id: r.id, label: r.label, routeLabel: rt.label });
+        }
+      }
+    }
+    for (const o of currentData.operationTypes) {
+      if (removeOpIds.includes(o.id)) continue;
+      // If this op-type's id appears in desired, it's being updated in place.
+      if (desiredOpIds.has(o.id)) continue;
+      if (o.src_location_id === orphanId || o.dest_location_id === orphanId) {
+        refs.push({ kind: 'operation_type', id: o.id, label: o.label });
+      }
+    }
+    if (refs.length > 0) {
+      externalRefs.push({
+        orphanId,
+        orphanLabel: orphan?.label || orphanId,
+        referencedBy: refs,
+      });
+    }
+  }
+
+  return {
+    toAdd: {
+      nodes: toAddNodes,
+      operationTypes: toAddOps,
+      routes: toAddRoutes,
+    },
+    toRemove: {
+      nodeIds: removeNodeIds,
+      opTypeIds: removeOpIds,
+      routeIds: removeRouteIds,
+      ruleIds: removeRuleIds,
+      putawayRuleIds: removePutawayRuleIds,
+    },
+    externalRefs,
+  };
+}
+
 function _genDelivery(input, ctx) {
   const { warehouseId: wid, warehouseCode: code, flags } = input;
   const stockId = ctx.stockId;
