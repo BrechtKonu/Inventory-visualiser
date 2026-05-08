@@ -2543,10 +2543,44 @@ export default function App() {
         addEdge(op.src_location_id, op.dest_location_id);
       const edges = [...edgeSet].map(e => e.split("\t"));
 
-      // ── Adjacency forwards/backwards ─────────────────────────────────────
+      // ── Adjacency + cycle handling ───────────────────────────────────────
+      // Real Odoo flows have cycles (e.g. Stock → Pre-Prod → Production → Stock
+      // for manufacturing). A naive longest-path BFS would loop around the cycle
+      // and inflate tier numbers without bound. Solution: classify back-edges
+      // via iterative DFS and exclude them from tier / barycenter computation.
+      // Edges still get rendered — they just don't drive layout.
+      const adjFFull = {};
+      for (const n of flowNodes) adjFFull[n.id] = [];
+      for (const [s, d] of edges) adjFFull[s].push(d);
+
+      const dfsVisited = new Set();
+      const dfsOnStack = new Set();
+      const backEdges = new Set();
+      for (const startId of nodeIds) {
+        if (dfsVisited.has(startId)) continue;
+        const stk = [{ node: startId, edges: adjFFull[startId] || [], idx: 0 }];
+        dfsVisited.add(startId); dfsOnStack.add(startId);
+        while (stk.length) {
+          const top = stk[stk.length - 1];
+          if (top.idx >= top.edges.length) {
+            dfsOnStack.delete(top.node); stk.pop(); continue;
+          }
+          const next = top.edges[top.idx++];
+          if (dfsOnStack.has(next)) {
+            backEdges.add(`${top.node}\t${next}`);
+          } else if (!dfsVisited.has(next)) {
+            dfsVisited.add(next); dfsOnStack.add(next);
+            stk.push({ node: next, edges: adjFFull[next] || [], idx: 0 });
+          }
+        }
+      }
+
       const adjF = {}, adjB = {};
       for (const n of flowNodes) { adjF[n.id] = []; adjB[n.id] = []; }
-      for (const [s, d] of edges) { adjF[s].push(d); adjB[d].push(s); }
+      for (const [s, d] of edges) {
+        if (backEdges.has(`${s}\t${d}`)) continue;
+        adjF[s].push(d); adjB[d].push(s);
+      }
 
       // ── Tier assignment via longest-path BFS from sources ────────────────
       // Sources: suppliers and any node with no incoming edges.
