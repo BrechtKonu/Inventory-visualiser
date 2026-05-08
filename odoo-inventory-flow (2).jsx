@@ -2796,61 +2796,120 @@ export default function App() {
         newPos[wh.id] = { x: minX, y: minY - 90 };
       });
 
-      // ── Auto-place op-type labels (clear labelDx/labelDy or set sensible defaults)
-      // Strategy: for each op-type, place its label callout at one of N positions
-      // around the blob center. Pick the candidate with the lowest collision score
-      // against other labels and other blobs.
-      const opPositions = []; // [{ id, blob: {minX,minY,maxX,maxY}, label: {x,y,w,h} }]
+      // ── Auto-place op-type labels ────────────────────────────────────────
+      // For each op-type, anchor the label near *one of its endpoint nodes*
+      // (so the leader line is short on wide blobs), then try 8 candidate
+      // positions around that anchor. Pick the lowest collision score.
+      // Renderer is matched: when labelDx/Dy is non-zero, the label uses the
+      // op's own blob.minY as its anchor (no cluster stacking offset).
+      const opPositions = []; // [{ id, blob, label, edge: {x1,y1,x2,y2} }]
+      // Pre-compute every blob bbox once so labels can avoid all of them.
+      const allBlobs = [];
+      for (const o of p.operationTypes) {
+        const s = newPos[o.src_location_id], d = newPos[o.dest_location_id];
+        if (!s || !d) continue;
+        allBlobs.push({
+          minX: Math.min(s.x, d.x) - 30,
+          minY: Math.min(s.y, d.y) - 30,
+          maxX: Math.max(s.x + NW, d.x + NW) + 30,
+          maxY: Math.max(s.y + NH, d.y + NH) + 30,
+          edge: { x1: s.x + NW / 2, y1: s.y + NH / 2, x2: d.x + NW / 2, y2: d.y + NH / 2 },
+        });
+      }
+
+      const LW = 150, LH = 20, OFF = 20;
       const newOps = p.operationTypes.map(op => {
         const sn = newPos[op.src_location_id], dn = newPos[op.dest_location_id];
         if (!sn || !dn) return op;
-        const PAD = 30;
         const blob = {
-          minX: Math.min(sn.x, dn.x) - PAD,
-          minY: Math.min(sn.y, dn.y) - PAD,
-          maxX: Math.max(sn.x + NW, dn.x + NW) + PAD,
-          maxY: Math.max(sn.y + NH, dn.y + NH) + PAD,
+          minX: Math.min(sn.x, dn.x) - 30,
+          minY: Math.min(sn.y, dn.y) - 30,
+          maxX: Math.max(sn.x + NW, dn.x + NW) + 30,
+          maxY: Math.max(sn.y + NH, dn.y + NH) + 30,
         };
-        const cx = (blob.minX + blob.maxX) / 2;
-        const cy = (blob.minY + blob.maxY) / 2;
-        const LW = 140, LH = 18;
-        // 8 candidates around the blob (N, NE, E, SE, S, SW, W, NW), distance OFFSET
-        const OFF = 30;
-        const candidates = [
-          { x: cx - LW / 2,                 y: blob.minY - OFF - LH }, // N
-          { x: blob.maxX + OFF,             y: blob.minY - LH / 2 },   // NE
-          { x: blob.maxX + OFF,             y: cy - LH / 2 },          // E
-          { x: blob.maxX + OFF,             y: blob.maxY + LH / 2 },   // SE
-          { x: cx - LW / 2,                 y: blob.maxY + OFF },      // S
-          { x: blob.minX - OFF - LW,        y: blob.maxY + LH / 2 },   // SW
-          { x: blob.minX - OFF - LW,        y: cy - LH / 2 },          // W
-          { x: blob.minX - OFF - LW,        y: blob.minY - LH / 2 },   // NW
+        // Anchor candidates near each endpoint AND at midpoint, so wide blobs
+        // don't fling labels into the centre of empty space.
+        const anchors = [
+          { ax: sn.x + NW / 2, ay: sn.y + NH / 2 },                        // src
+          { ax: dn.x + NW / 2, ay: dn.y + NH / 2 },                        // dst
+          { ax: (sn.x + dn.x + NW) / 2, ay: (sn.y + dn.y + NH) / 2 },      // mid
         ];
-        // Score each candidate: lower = better
+        // Around each anchor, generate compact 8-direction candidates
+        const directions = [
+          [ 0, -1], [ 1, -1], [ 1, 0], [ 1, 1],
+          [ 0,  1], [-1,  1], [-1, 0], [-1,-1],
+        ];
+        const candidates = [];
+        for (const { ax, ay } of anchors) {
+          for (const [ux, uy] of directions) {
+            const dist = 80;
+            const x = ax + ux * dist - LW / 2;
+            const y = ay + uy * dist - LH / 2;
+            candidates.push({ x, y });
+          }
+        }
+        // Plus a few cardinal positions outside the blob (for ops whose blob is small)
+        candidates.push({ x: (blob.minX + blob.maxX) / 2 - LW / 2, y: blob.minY - OFF - LH }); // N of blob
+        candidates.push({ x: (blob.minX + blob.maxX) / 2 - LW / 2, y: blob.maxY + OFF });      // S of blob
+
+        // Distance helper: line-rect overlap test (approximate via segment-rect intersection)
+        const segRectHits = (x1, y1, x2, y2, r) => {
+          // Quick reject
+          if (Math.max(x1, x2) < r.x0 || Math.min(x1, x2) > r.x1) return false;
+          if (Math.max(y1, y2) < r.y0 || Math.min(y1, y2) > r.y1) return false;
+          // Check 4 rect-edge intersections via parametric form
+          const segIntersect = (ax, ay, bx, by, cx, cy, dx, dy) => {
+            const denom = (ax - bx) * (cy - dy) - (ay - by) * (cx - dx);
+            if (denom === 0) return false;
+            const t = ((ax - cx) * (cy - dy) - (ay - cy) * (cx - dx)) / denom;
+            const u = -((ax - bx) * (ay - cy) - (ay - by) * (ax - cx)) / denom;
+            return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+          };
+          return segIntersect(x1, y1, x2, y2, r.x0, r.y0, r.x1, r.y0) ||
+                 segIntersect(x1, y1, x2, y2, r.x1, r.y0, r.x1, r.y1) ||
+                 segIntersect(x1, y1, x2, y2, r.x1, r.y1, r.x0, r.y1) ||
+                 segIntersect(x1, y1, x2, y2, r.x0, r.y1, r.x0, r.y0);
+        };
+
         const score = (c) => {
           let s = 0;
-          // Penalty for overlap with other op blobs
-          for (const o of opPositions) {
-            const labelRect = { x0: c.x, y0: c.y, x1: c.x + LW, y1: c.y + LH };
-            // overlap with other blob
-            if (!(labelRect.x1 < o.blob.minX || labelRect.x0 > o.blob.maxX || labelRect.y1 < o.blob.minY || labelRect.y0 > o.blob.maxY)) s += 50;
-            // overlap with other label
-            if (!(labelRect.x1 < o.label.x || labelRect.x0 > o.label.x + o.label.w || labelRect.y1 < o.label.y || labelRect.y0 > o.label.y + o.label.h)) s += 100;
+          const labelR = { x0: c.x, y0: c.y, x1: c.x + LW, y1: c.y + LH };
+          // Distance from blob center (prefer close)
+          const bx = (blob.minX + blob.maxX) / 2, by = (blob.minY + blob.maxY) / 2;
+          const labelCx = c.x + LW / 2, labelCy = c.y + LH / 2;
+          s += Math.hypot(labelCx - bx, labelCy - by) * 0.05;
+          // Penalty: overlap with other blobs (skip own blob)
+          for (let i = 0; i < allBlobs.length; i++) {
+            const o = allBlobs[i];
+            if (o === blob) continue;
+            if (!(labelR.x1 < o.minX || labelR.x0 > o.maxX || labelR.y1 < o.minY || labelR.y0 > o.maxY)) s += 80;
+            // Penalty: label crosses an edge (line from src→dst of another op)
+            if (segRectHits(o.edge.x1, o.edge.y1, o.edge.x2, o.edge.y2, labelR)) s += 40;
           }
-          // Slight preference for North position (cleaner)
+          // Penalty: overlap with already-placed labels
+          for (const placed of opPositions) {
+            const o = placed.label;
+            if (!(labelR.x1 < o.x || labelR.x0 > o.x + o.w || labelR.y1 < o.y || labelR.y0 > o.y + o.h)) s += 200;
+          }
+          // Penalty: too close to a flow node (overlap with leaf rect)
+          for (const n of flowNodes) {
+            const np = newPos[n.id];
+            if (!np) continue;
+            const nodeR = { x0: np.x, y0: np.y, x1: np.x + NW, y1: np.y + NH };
+            if (!(labelR.x1 < nodeR.x0 || labelR.x0 > nodeR.x1 || labelR.y1 < nodeR.y0 || labelR.y0 > nodeR.y1)) s += 150;
+          }
           return s;
         };
+
         let best = candidates[0], bestS = Infinity;
         for (const c of candidates) {
-          const s = score(c);
-          if (s < bestS) { bestS = s; best = c; }
+          const sc = score(c);
+          if (sc < bestS) { bestS = sc; best = c; }
         }
-        // Convert absolute pos to relative offset (the renderer expects labelDx/labelDy)
-        // Default position the renderer uses is (b.minX + 6, cTop - 14). So:
-        const defaultLx = blob.minX + 6;
-        const defaultLy = blob.minY - 14;
-        const labelDx = Math.round(best.x - defaultLx);
-        const labelDy = Math.round(best.y - defaultLy);
+        // Renderer uses (b.minX + 6, b.minY - 14) as anchor when labelDx/Dy != 0,
+        // so compute the offset from that anchor.
+        const labelDx = Math.round(best.x - (blob.minX + 6));
+        const labelDy = Math.round(best.y - (blob.minY - 14));
         opPositions.push({ id: op.id, blob, label: { x: best.x, y: best.y, w: LW, h: LH } });
         return { ...op, labelDx, labelDy };
       });
@@ -3551,10 +3610,15 @@ export default function App() {
                 const sw = (b.maxX - b.minX) * scale, sh = (b.maxY - b.minY) * scale;
                 const idx = labelIdxOf.get(op.id) || 0;
                 const cTopY = clusterTopY.get(cluster[i]);
-                // Default label position: above the cluster's topmost edge, stacked.
-                // Per-op user-drag offset stored in op.labelDx / op.labelDy (world coords).
+                // Default label position: above the cluster's topmost edge, stacked
+                // (only when labelDx/Dy are 0 — i.e. neither auto-placed nor user-dragged).
+                // When labelDx/Dy is set (auto-layout or manual drag), anchor to *this op's*
+                // blob top-left so the renderer matches what the auto-placer / drag computed.
+                const hasLabelOffset = (op.labelDx || 0) !== 0 || (op.labelDy || 0) !== 0;
                 const labelXWorld = b.minX + 6 + (op.labelDx || 0);
-                const labelYWorld = cTopY - 14 - idx * (LABEL_H + 2) + (op.labelDy || 0);
+                const labelYWorld = hasLabelOffset
+                  ? b.minY - 14 + (op.labelDy || 0)
+                  : cTopY - 14 - idx * (LABEL_H + 2);
                 const labelX = labelXWorld * scale + offset.x;
                 const labelY = labelYWorld * scale + offset.y;
                 // Anchor the leader line to the closest point on the blob's perimeter.
