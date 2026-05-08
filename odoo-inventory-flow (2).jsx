@@ -717,6 +717,44 @@ const TEMPLATES = [
   { id: "crossdock",     name: "Crossdock",             description: "Inbound forwarded directly to outbound",              icon: "⇄", build: buildXDock },
 ];
 
+// ─── SEQUENCE BACKFILL ON IMPORT ─────────────────────────────────────────────
+// Minimal sequence backfill on import. Fills missing/zero sequence on putaway
+// rules and missing sequence_code on op-types. Brainstorm pending — see CLAUDE.md.
+//
+// TODO(brainstorm-needed): minimal sequence backfill added 2026-05-09.
+// Open questions per CLAUDE.md: warehouse code autogen, route sequence,
+// conflict resolution when prefixes collide (e.g. two ops with similar
+// labels both → "QCH"). Pending Q&A pass with Brecht.
+function backfillSequences(data) {
+  if (!data || typeof data !== "object") return data;
+  const out = { ...data };
+  if (Array.isArray(out.putawayRules)) {
+    out.putawayRules = out.putawayRules.map((pr, i) => ({
+      ...pr,
+      sequence: (pr.sequence && Number.isFinite(+pr.sequence) && +pr.sequence > 0) ? pr.sequence : (i + 1) * 10,
+    }));
+  }
+  if (Array.isArray(out.operationTypes)) {
+    out.operationTypes = out.operationTypes.map(o => {
+      if (o.sequence_code && String(o.sequence_code).trim()) return o;
+      const words = String(o.label || "").split(/\s+/).filter(Boolean);
+      let prefix = "";
+      if (words.length >= 2) prefix = words.slice(0, 3).map(w => w[0]).join("").toUpperCase();
+      else if (words.length === 1) prefix = words[0].slice(0, 3).toUpperCase();
+      else prefix = "OPN";
+      // Pad to 3 chars (rare edge cases like single-letter labels)
+      while (prefix.length < 3) prefix += "X";
+      const finalPrefix = prefix.slice(0, 3);
+      return {
+        ...o,
+        sequence_code: finalPrefix,
+        data: { ...(o.data || {}), sequence_code: finalPrefix },
+      };
+    });
+  }
+  return out;
+}
+
 // ─── ROUTE OFFSET DETECTION (fan out overlapping/bidirectional edges) ────────
 // Groups all rules by canonical node pair (sorted IDs) and assigns symmetric
 // offsets so overlapping edges spread out and bidirectional pairs go on
@@ -2454,11 +2492,12 @@ export default function App() {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (parsed.version !== 1 || !parsed.data) throw new Error("Invalid file format");
+        const imported = backfillSequences(parsed.data);
         setData(prev => {
           historyRef.current = [...historyRef.current.slice(-49), prev];
           futureRef.current = [];
           setCanUndo(true); setCanRedo(false);
-          return parsed.data;
+          return imported;
         });
         if (parsed.apiCfg) setApiCfg(parsed.apiCfg);
         setSel(null);
@@ -3522,7 +3561,7 @@ export default function App() {
     setFetchStatus({ loading: true, progress: "Connecting…" });
     try {
       const result = await fetchInventoryFromOdoo(apiCfg, msg => setFetchStatus({ loading: true, progress: msg }));
-      const fetched = result.data;
+      const fetched = backfillSequences(result.data);
       // Push current data to history so fetch is undoable
       setData(prev => {
         historyRef.current = [...historyRef.current.slice(-49), prev];
