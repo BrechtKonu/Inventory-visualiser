@@ -1922,6 +1922,101 @@ export default function App() {
     URL.revokeObjectURL(a.href);
   }, [data, apiCfg]);
 
+  // Helper: turn the live SVG canvas into a self-contained <svg> string.
+  // Computes the world-space bounding box of all visible nodes/op-types and
+  // re-projects the SVG so the export is tightly cropped (not the viewport).
+  const buildExportSvg = useCallback(() => {
+    if (!svgRef.current) return null;
+    const clone = svgRef.current.cloneNode(true);
+    // Compute world-space bbox of all visible content
+    const visible = data.nodes.filter(n => !(hideUnused && n.type === "location" && !usedLocationIds.has(n.id)));
+    if (visible.length === 0) return null;
+    const PAD = 60;
+    const minX = Math.min(...visible.map(n => n.x)) - PAD;
+    const minY = Math.min(...visible.map(n => n.y)) - PAD;
+    const maxX = Math.max(...visible.map(n => n.x + NW)) + PAD;
+    const maxY = Math.max(...visible.map(n => n.y + NH)) + PAD;
+    const w = maxX - minX, h = maxY - minY;
+    // Re-create as a fresh SVG with the right viewBox (ignores current pan/zoom).
+    // We can't easily re-render — easier to wrap the clone in a transform that
+    // negates the current screen offset/scale and produces world coords.
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    clone.setAttribute("width", Math.round(w));
+    clone.setAttribute("height", Math.round(h));
+    // The live SVG has all coords in screen space (offset.x + scale*world). Reproject:
+    // wrap children in a <g transform="translate(-offset.x,-offset.y) scale(1/scale) translate(-minX,-minY)">
+    const wrap = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    const t = `translate(${-minX},${-minY}) scale(${1 / scale}) translate(${-offset.x},${-offset.y})`;
+    wrap.setAttribute("transform", t);
+    while (clone.firstChild) wrap.appendChild(clone.firstChild);
+    clone.appendChild(wrap);
+    clone.setAttribute("viewBox", `0 0 ${Math.round(w)} ${Math.round(h)}`);
+    // Fill bg so the export isn't transparent
+    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bg.setAttribute("x", 0); bg.setAttribute("y", 0);
+    bg.setAttribute("width", "100%"); bg.setAttribute("height", "100%");
+    bg.setAttribute("fill", T.bg);
+    clone.insertBefore(bg, clone.firstChild);
+    return new XMLSerializer().serializeToString(clone);
+  }, [data.nodes, scale, offset, hideUnused, usedLocationIds]);
+
+  const handleExportSvg = useCallback(() => {
+    const xml = buildExportSvg();
+    if (!xml) return alert("Nothing to export.");
+    const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "odoo-inventory.svg";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [buildExportSvg]);
+
+  const handleExportPng = useCallback(() => {
+    const xml = buildExportSvg();
+    if (!xml) return alert("Nothing to export.");
+    // Parse w/h out of the SVG so the canvas matches
+    const sizeMatch = xml.match(/width="(\d+)"\s+height="(\d+)"/);
+    const w = sizeMatch ? parseInt(sizeMatch[1], 10) : 1200;
+    const h = sizeMatch ? parseInt(sizeMatch[2], 10) : 800;
+    const dpr = 2; // 2x for crisp on retina
+    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = T.bg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, w * dpr, h * dpr);
+      canvas.toBlob(blob => {
+        if (!blob) return alert("PNG render failed (browser blocked the SVG-to-canvas pipeline).");
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "odoo-inventory.png";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }, "image/png");
+    };
+    img.onerror = () => alert("PNG render failed — try the SVG export instead.");
+    img.src = url;
+  }, [buildExportSvg]);
+
+  const handleExportPdf = useCallback(() => {
+    // Open the SVG in a new window with a print-friendly stylesheet, then trigger print.
+    // The user picks "Save as PDF" in the browser's print dialog.
+    const xml = buildExportSvg();
+    if (!xml) return alert("Nothing to export.");
+    const w = window.open("", "_blank");
+    if (!w) return alert("Popup blocked — allow popups for this site to export PDF.");
+    w.document.write(`<!doctype html><html><head><title>Odoo Inventory Flow</title>
+      <style>
+        @page { margin: 12mm; size: landscape; }
+        body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+        svg { max-width: 100%; height: auto; }
+      </style></head><body>${xml}<script>setTimeout(()=>window.print(), 250);</script></body></html>`);
+    w.document.close();
+  }, [buildExportSvg]);
+
   // Import diagram from JSON file
   const handleImport = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -2885,7 +2980,16 @@ export default function App() {
             {pushStatus?.loading ? (pushStatus.progress || "Pushing…") : pushStatus?.ok || "Push to Odoo"}
           </Btn>
           <div style={{ width: 1, height: 18, background: T.border, alignSelf: "center", margin: "0 2px" }} />
-          <Btn small compact={compact} icon="upload" onClick={handleExport} variant="ghost" title="Export diagram as JSON">Export</Btn>
+          <Btn small compact={compact} icon="upload" variant="ghost" title="Export…"
+            onClick={e => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setCtxMenu({ x: r.left, y: r.bottom + 4, items: [
+                { id: "ex-json", icon: "{ }", label: "Export JSON",       hint: "Round-trip with Import",         run: handleExport },
+                { id: "ex-svg",  icon: "✥",   label: "Export SVG (vector)", hint: "Infinite zoom · embeddable",   run: handleExportSvg },
+                { id: "ex-png",  icon: "▦",   label: "Export PNG (2× retina)", hint: "Slides, email, screenshots", run: handleExportPng },
+                { id: "ex-pdf",  icon: "▤",   label: "Export PDF (browser print)", hint: "Opens print dialog",     run: handleExportPdf },
+              ]});
+            }}>Export</Btn>
           <Btn small compact={compact} icon="download" onClick={() => importRef.current?.click()} variant="ghost" title="Import diagram from JSON">Import</Btn>
           <input ref={importRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
           <Btn small variant="ghost" onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K or /)">
@@ -3710,7 +3814,10 @@ export default function App() {
         );
         // File / Data
         cmds.push(
-          { id: "data-export",  group: "Data", label: "Export as JSON", icon: "⬇", run: handleExport },
+          { id: "data-export",  group: "Data", label: "Export as JSON", icon: "{ }", run: handleExport },
+          { id: "data-svg",     group: "Data", label: "Export as SVG (vector)", icon: "✥", run: handleExportSvg },
+          { id: "data-png",     group: "Data", label: "Export as PNG", icon: "▦", run: handleExportPng },
+          { id: "data-pdf",     group: "Data", label: "Export as PDF (print)", icon: "▤", run: handleExportPdf },
           { id: "data-import",  group: "Data", label: "Import JSON…",   icon: "⬆", run: () => importRef.current?.click() },
           { id: "data-fetch",   group: "Data", label: "Fetch from Odoo", icon: "⏬", hint: KONU_CFG ? `Connection: ${KONU_CFG.connectionName}` : "Uses configured credentials", run: handleFetchFromOdoo },
           { id: "data-push",    group: "Data", label: "Push to Odoo",    icon: "⏫", hint: fetchedSnapshot ? "Diff against last fetch" : "Fetch first to enable", run: handlePushToOdoo },
