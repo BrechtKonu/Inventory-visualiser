@@ -203,4 +203,59 @@ it('buy with reception_steps=three_steps → Vendors → Input buy rule', () => 
   assert.equal(buy.rules[0].dest_location_id, 'wh1-input');
 });
 
+// ── resupply ─────────────────────────────────────
+
+const ctxR = (resupply_wh_ids) => ctx({
+  flags: { ...ctx().flags, resupply_wh_ids },
+  warehouseId: 'wh2', warehouseCode: 'WH2', warehouseName: 'Secondary',
+  existingNodes: [
+    { id: 'loc-vendors',   type: 'location', label: 'Vendors',    data: { usage: 'supplier' } },
+    { id: 'loc-customers', type: 'location', label: 'Customers',  data: { usage: 'customer' } },
+    { id: 'wh1-stock',     type: 'location', label: 'WH/Stock',   data: { usage: 'internal' },
+      __autoGen: { warehouseId: 'wh1', source: 'reception_steps' } },
+    { id: 'wh2-stock',     type: 'location', label: 'WH2/Stock',  data: { usage: 'internal' },
+      __autoGen: { warehouseId: 'wh2', source: 'reception_steps' } },
+  ],
+});
+
+it('resupply: empty resupply_wh_ids produces nothing', () => {
+  const r = presetGenerator(ctxR([]));
+  assert.equal(r.addNodes.filter(n => n.__autoGen?.source?.startsWith('resupply:')).length, 0);
+});
+
+it('resupply: target wh2 from source wh1 — Transit on target side', () => {
+  const r = presetGenerator(ctxR(['wh1']));
+  const transit = r.addNodes.find(n => n.data.usage === 'transit');
+  assert.ok(transit);
+  assert.equal(transit.__autoGen.warehouseId, 'wh2');
+  assert.equal(transit.__autoGen.source, 'resupply:wh1');
+});
+
+it('resupply: target wh2 from source wh1 — IN op-type on target side', () => {
+  const r = presetGenerator(ctxR(['wh1']));
+  const inOp = r.addOperationTypes.find(o => o.label === 'Receipts from WH');
+  assert.ok(inOp);
+  assert.equal(inOp.__autoGen.warehouseId, 'wh2');
+  assert.equal(inOp.__autoGen.source, 'resupply:wh1');
+});
+
+it('resupply: OUT op-type tagged to source warehouse + source key resupply:<target>', () => {
+  const r = presetGenerator(ctxR(['wh1']));
+  const outOp = r.addOperationTypes.find(o => o.label === 'Send to WH2');
+  assert.ok(outOp);
+  assert.equal(outOp.__autoGen.warehouseId, 'wh1', 'OUT op-type belongs to source warehouse');
+  assert.equal(outOp.__autoGen.source, 'resupply:wh2', 'source key uses target warehouse id');
+});
+
+it('resupply: route has 2 rules, target-side, tagged resupply:<source>', () => {
+  const r = presetGenerator(ctxR(['wh1']));
+  const route = r.addRoutes.find(rt => rt.__autoGen?.source === 'resupply:wh1');
+  assert.ok(route);
+  assert.equal(route.__autoGen.warehouseId, 'wh2');
+  assert.equal(route.rules.length, 2);
+  assert.equal(route.rules[0].src_location_id, 'wh1-stock');
+  assert.equal(route.rules[0].dest_location_id, route.rules[1].src_location_id, 'rule 2 src = rule 1 dst (Transit)');
+  assert.equal(route.rules[1].dest_location_id, 'wh2-stock');
+});
+
 await flush();

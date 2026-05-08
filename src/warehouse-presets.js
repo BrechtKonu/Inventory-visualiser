@@ -61,6 +61,12 @@ export function presetGenerator(input) {
     out.addOperationTypes.push(...r.addOperationTypes);
     out.addRoutes.push(...r.addRoutes);
   }
+  if (Array.isArray(input.flags?.resupply_wh_ids) && input.flags.resupply_wh_ids.length > 0) {
+    const r = _genResupply(input, ctx);
+    out.addNodes.push(...r.addNodes);
+    out.addOperationTypes.push(...r.addOperationTypes);
+    out.addRoutes.push(...r.addRoutes);
+  }
   return out;
 }
 
@@ -255,6 +261,71 @@ function _genBuy(input, ctx) {
       ], { warehouse_selectable: true }, tag),
     ],
   };
+}
+
+function _resolveSourceStockId(existingNodes, sourceWid) {
+  const fromTag = existingNodes.find(n =>
+    n.type === 'location' &&
+    n.data?.usage === 'internal' &&
+    n.__autoGen?.warehouseId === sourceWid &&
+    /\bStock\b/.test(n.label || ''));
+  if (fromTag) return fromTag.id;
+  return `${sourceWid}-stock`;
+}
+
+function _resolveSourceCode(existingNodes, sourceWid) {
+  const wh = existingNodes.find(n => n.type === 'warehouse' && n.id === sourceWid);
+  return wh?.data?.code || 'WH';
+}
+
+function _genResupply(input, ctx) {
+  const { warehouseId: targetWid, warehouseCode: targetCode, flags, existingNodes } = input;
+  const out = { addNodes: [], addOperationTypes: [], addRoutes: [] };
+  const seq = (suffix) => `${targetCode === 'WH' ? '' : targetCode + '-'}${suffix}`;
+
+  flags.resupply_wh_ids.forEach((sourceWid, idx) => {
+    const sourceCode = _resolveSourceCode(existingNodes, sourceWid);
+    const sourceStockId = _resolveSourceStockId(existingNodes, sourceWid);
+    const targetTag = _internal._autoTag(targetWid, `resupply:${sourceWid}`);
+    const sourceTag = _internal._autoTag(sourceWid, `resupply:${targetWid}`);
+
+    const transitId = `${targetWid}-transit-${sourceWid}`;
+    const transitLoc = _internal._loc(transitId, `${targetCode}/Transit (from ${sourceCode})`,
+      'transit', `${targetCode}-TRANSIT-${sourceCode}`, {}, targetTag);
+
+    const inOp = _internal._ot(`${targetWid}-op-in-${sourceWid}`, `Receipts from ${sourceCode}`,
+      'incoming', transitId, ctx.stockId, seq(`IN-${sourceCode}`), targetTag);
+
+    const outOp = _internal._ot(`${sourceWid}-op-out-${targetWid}`, `Send to ${targetCode}`,
+      'outgoing', sourceStockId, transitId,
+      `${sourceCode === 'WH' ? '' : sourceCode + '-'}OUT-${targetCode}`, sourceTag);
+
+    const route = _internal._route(
+      `${targetWid}-route-resupply-${sourceWid}`,
+      `Resupply from ${sourceCode}`,
+      // Route color offset: reception=+0, delivery=+1, manufacture=+2, buy=+4, resupply=+5+idx.
+      ctx.routeColorBase + 5 + idx,
+      [
+        _internal._rule(
+          `${targetWid}-rl-resupply-${sourceWid}-1`,
+          `${sourceCode}/Stock → Transit`, 'pull', 'make_to_order',
+          sourceStockId, transitId, outOp.id, 'manual', 0, targetTag,
+        ),
+        _internal._rule(
+          `${targetWid}-rl-resupply-${sourceWid}-2`,
+          `Transit → ${targetCode}/Stock`, 'pull', 'make_to_order',
+          transitId, ctx.stockId, inOp.id, 'manual', 0, targetTag,
+        ),
+      ],
+      { warehouse_selectable: true },
+      targetTag,
+    );
+
+    out.addNodes.push(transitLoc);
+    out.addOperationTypes.push(inOp, outOp);
+    out.addRoutes.push(route);
+  });
+  return out;
 }
 
 function _genDelivery(input, ctx) {
