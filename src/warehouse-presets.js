@@ -25,18 +25,44 @@
 
 export function presetGenerator(input) {
   const out = { addNodes: [], addOperationTypes: [], addRoutes: [] };
-  // Resolve common ids: vendors/customers (existing or fallback), stock (assumed to exist with id `<wid>-stock`)
+  const idTag = _internal._autoTag(input.warehouseId, 'identity');
+
+  // Warehouse node — skip if already on canvas
+  const whExisting = input.existingNodes.find(n => n.type === 'warehouse' && n.id === input.warehouseId);
+  if (!whExisting) {
+    out.addNodes.push({
+      id: input.warehouseId, type: 'warehouse', label: input.warehouseName, x: 0, y: 0,
+      data: { code: input.warehouseCode, name: input.warehouseName, ...input.flags, active: true },
+      __autoGen: idTag,
+    });
+  }
+
+  // Stock — always per-warehouse, but skip if already on canvas
+  const stockId = `${input.warehouseId}-stock`;
+  const stockExisting = input.existingNodes.find(n =>
+    n.type === 'location' && n.id === stockId);
+  if (!stockExisting) {
+    out.addNodes.push(_internal._loc(
+      stockId, `${input.warehouseCode}/Stock`, 'internal',
+      `${input.warehouseCode}-STOCK`, {}, idTag,
+    ));
+  }
+
+  // Vendors / Customers — emit only if missing on canvas
   const vendorsExisting = _findByUsage(input.existingNodes, 'supplier');
   const customersExisting = _findByUsage(input.existingNodes, 'customer');
-  const stockExisting = input.existingNodes.find(n =>
-    n.type === 'location' && n.data?.usage === 'internal' &&
-    n.id === `${input.warehouseId}-stock`);
-  const ctx = {
-    vendorsId: vendorsExisting?.id ?? 'loc-vendors',
-    customersId: customersExisting?.id ?? 'loc-customers',
-    stockId: stockExisting?.id ?? `${input.warehouseId}-stock`,
-    routeColorBase: 0,
-  };
+  let vendorsId = vendorsExisting?.id;
+  let customersId = customersExisting?.id;
+  if (!vendorsExisting) {
+    vendorsId = 'loc-vendors';
+    out.addNodes.push(_internal._loc(vendorsId, 'Vendors', 'supplier', '', {}, idTag));
+  }
+  if (!customersExisting) {
+    customersId = 'loc-customers';
+    out.addNodes.push(_internal._loc(customersId, 'Customers', 'customer', '', {}, idTag));
+  }
+
+  const ctx = { vendorsId, customersId, stockId, routeColorBase: 0, existingNodes: input.existingNodes };
   if (input.flags?.reception_steps) {
     const r = _genReception(input, ctx);
     out.addNodes.push(...r.addNodes);

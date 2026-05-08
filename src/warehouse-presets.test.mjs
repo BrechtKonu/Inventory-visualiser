@@ -24,7 +24,9 @@ it('skeleton: presetGenerator returns empty arrays by default', () => {
     warehouseId: 'wh1', warehouseCode: 'WH', warehouseName: 'Main',
     flags: {}, existingNodes: [],
   });
-  assert.deepEqual(r, { addNodes: [], addOperationTypes: [], addRoutes: [] });
+  // Identity emissions happen even with empty flags; only flag-driven generators are silent.
+  assert.equal(r.addOperationTypes.filter(o => o.__autoGen?.source !== 'identity').length, 0);
+  assert.equal(r.addRoutes.filter(rt => rt.__autoGen?.source !== 'identity').length, 0);
 });
 
 // ── reception_steps ─────────────────────────────────────
@@ -256,6 +258,61 @@ it('resupply: route has 2 rules, target-side, tagged resupply:<source>', () => {
   assert.equal(route.rules[0].src_location_id, 'wh1-stock');
   assert.equal(route.rules[0].dest_location_id, route.rules[1].src_location_id, 'rule 2 src = rule 1 dst (Transit)');
   assert.equal(route.rules[1].dest_location_id, 'wh2-stock');
+});
+
+// ── orchestrator (Stock + Vendors + Customers + Warehouse) ─────────────
+
+it('orchestrator: empty canvas + new warehouse → emits Warehouse + Stock + Vendors + Customers', () => {
+  const r = presetGenerator({
+    warehouseId: 'wh1', warehouseCode: 'WH', warehouseName: 'Main',
+    flags: { reception_steps: 'one_step', delivery_steps: 'ship_only',
+             manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+             buy_to_resupply: false, resupply_wh_ids: [] },
+    existingNodes: [],
+  });
+  const labels = r.addNodes.map(n => n.label).sort();
+  assert.deepEqual(labels, ['Customers', 'Main', 'Vendors', 'WH/Stock']);
+  for (const n of r.addNodes) {
+    assert.ok(n.__autoGen, `${n.label} should have __autoGen`);
+    if (['Vendors', 'Customers', 'WH/Stock', 'Main'].includes(n.label)) {
+      assert.equal(n.__autoGen.source, 'identity', `${n.label} → identity`);
+    }
+  }
+});
+
+it('orchestrator: existing Vendors on canvas → reused, not duplicated', () => {
+  const r = presetGenerator({
+    warehouseId: 'wh2', warehouseCode: 'WH2', warehouseName: 'Secondary',
+    flags: { reception_steps: 'one_step', delivery_steps: 'ship_only',
+             manufacture_to_resupply: false, manufacture_steps: 'mrp_one_step',
+             buy_to_resupply: false, resupply_wh_ids: [] },
+    existingNodes: [
+      { id: 'loc-vendors',   type: 'location', label: 'Vendors',   data: { usage: 'supplier' } },
+      { id: 'loc-customers', type: 'location', label: 'Customers', data: { usage: 'customer' } },
+    ],
+  });
+  assert.equal(r.addNodes.filter(n => n.label === 'Vendors').length, 0);
+  assert.equal(r.addNodes.filter(n => n.label === 'Customers').length, 0);
+  const opR = r.addOperationTypes.find(o => o.label === 'Receipts');
+  assert.equal(opR.src_location_id, 'loc-vendors');
+});
+
+it('orchestrator: warehouse node carries the flags as its data', () => {
+  const r = presetGenerator({
+    warehouseId: 'wh1', warehouseCode: 'WH', warehouseName: 'Main',
+    flags: { reception_steps: 'three_steps', delivery_steps: 'pick_pack_ship',
+             manufacture_to_resupply: true, manufacture_steps: 'pbm_sam',
+             buy_to_resupply: true, resupply_wh_ids: [] },
+    existingNodes: [],
+  });
+  const wh = r.addNodes.find(n => n.type === 'warehouse');
+  assert.ok(wh);
+  assert.equal(wh.id, 'wh1');
+  assert.equal(wh.data.code, 'WH');
+  assert.equal(wh.data.name, 'Main');
+  assert.equal(wh.data.reception_steps, 'three_steps');
+  assert.equal(wh.data.manufacture_steps, 'pbm_sam');
+  assert.equal(wh.data.buy_to_resupply, true);
 });
 
 await flush();
