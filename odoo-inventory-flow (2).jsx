@@ -2259,6 +2259,12 @@ export default function App() {
   const [fetchedSnapshot, setFetchedSnapshot] = useState(null); // deep copy of data after last fetch
   const [odooCtx, setOdooCtx] = useState({}); // Odoo user_context for write calls
   const [hideUnused, setHideUnused] = useState(false);
+  // Op-type visualisation mode — replaces the older blob+leader-line UI.
+  // 'pills'      = inline capsule pills at each rule's edge midpoint (default)
+  // 'pills_wash' = pills + a faded color wash filling each op's src/dst bbox
+  // 'hidden'     = no pills/wash by default; reveal a pill when its rule is hovered or selected
+  const [opVizMode, setOpVizMode] = useState('pills');
+  const [hoveredRuleId, setHoveredRuleId] = useState(null);
   const svgRef = useRef(null);
   const importRef = useRef(null);
   const historyRef = useRef([]);
@@ -2897,6 +2903,17 @@ export default function App() {
     });
     setSel(null);
   }, []);
+
+  // Persist op-viz mode across reloads (viewing pref, not part of `data`)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('opVizMode');
+      if (saved && ['pills', 'pills_wash', 'hidden'].includes(saved)) setOpVizMode(saved);
+    } catch (_) { /* localStorage may be unavailable */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('opVizMode', opVizMode); } catch (_) { /* ignore */ }
+  }, [opVizMode]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -3935,6 +3952,12 @@ export default function App() {
             </div>
           )}
           <Btn small variant="ghost" onClick={autoLayout} title="Auto-layout nodes">⊞</Btn>
+          <Btn small variant="ghost"
+               onClick={() => setOpVizMode(m => m === 'pills' ? 'pills_wash' : m === 'pills_wash' ? 'hidden' : 'pills')}
+               title={`Op viz: ${opVizMode === 'pills' ? 'Pills' : opVizMode === 'pills_wash' ? 'Pills + wash' : 'Hidden (hover/select)'}. Click to cycle.`}
+               style={opVizMode !== 'pills' ? { background: T.accentSoft, color: T.accent } : {}}>
+            {opVizMode === 'pills' ? '◇' : opVizMode === 'pills_wash' ? '◆' : '◌'}
+          </Btn>
           <Btn small variant="ghost" onClick={() => setHideUnused(v => !v)} title={hideUnused ? "Show all locations" : "Hide locations not used in any rule"} style={hideUnused ? { background: T.accentSoft, color: T.accent } : {}}>
             {compact ? (hideUnused ? "👁" : "✕") : (hideUnused ? "Show all" : "Hide unused")}
           </Btn>
@@ -4196,8 +4219,34 @@ export default function App() {
               );
             })}
 
-            {/* OP TYPE GROUPS — blob + leader-line label, label-collision aware */}
-            {(() => {
+            {/* OP TYPE WASH — faded color rect per op-type, only in 'pills_wash' mode.
+                Replaces the older blob+leader-line UI; pill rendering happens after edges below. */}
+            {opVizMode === 'pills_wash' && (() => {
+              const PAD = 30;
+              return data.operationTypes.map(op => {
+                const sn = data.nodes.find(n => n.id === op.src_location_id);
+                const dn = data.nodes.find(n => n.id === op.dest_location_id);
+                if (!sn || !dn) return null;
+                const minX = Math.min(sn.x, dn.x) - PAD;
+                const minY = Math.min(sn.y, dn.y) - PAD;
+                const maxX = Math.max(sn.x + NW, dn.x + NW) + PAD;
+                const maxY = Math.max(sn.y + NH, dn.y + NH) + PAD;
+                const sx = minX * scale + offset.x, sy = minY * scale + offset.y;
+                const sw = (maxX - minX) * scale, sh = (maxY - minY) * scale;
+                // Per-op stable hue (mid-saturation, mid-lightness so wash reads as colored)
+                const hue = hashColor(op.id, 60, 50);
+                return (
+                  <rect key={`wash-${op.id}`} x={sx} y={sy} width={sw} height={sh}
+                        rx={20 * scale} ry={20 * scale}
+                        fill={hue} fillOpacity={0.08} stroke="none" pointerEvents="none" />
+                );
+              });
+            })()}
+
+            {/* TODO: remove dead op-blob code path after pills/wash settle in production.
+                Auto-layout still computes labelDx/Dy on each op; those values are now
+                unused by the renderer but harmless. Rip out once the new viz proves out. */}
+            {false && (() => {
               // Build world-space bounding box per op
               const PAD = 30;
               const items = [];
@@ -4367,7 +4416,11 @@ export default function App() {
                   const isUmbrella = !!(op && (op.dest_location_id !== rule.dest_location_id || op.src_location_id !== rule.src_location_id));
                   const tip = `${meta.label} · ${procure.replace(/_/g, "-")} · ${rule.data?.delay || 0}d · ${rule.data?.auto || rule.auto || "manual"}${isUmbrella ? `\nUmbrella → real picking ${op.src_location_id ? `${(data.nodes.find(n=>n.id===op.src_location_id)?.label||"?")} → ${(data.nodes.find(n=>n.id===op.dest_location_id)?.label||"?")}` : ""}` : ""}`;
                   return (
-                    <g key={rule.id} opacity={dimEdge ? 0.12 : (routeInactive ? 0.4 : 1)} onClick={e => { e.stopPropagation(); doSelect(rule.id); }} style={{ cursor: "pointer" }}>
+                    <g key={rule.id} opacity={dimEdge ? 0.12 : (routeInactive ? 0.4 : 1)}
+                       onClick={e => { e.stopPropagation(); doSelect(rule.id); }}
+                       onMouseEnter={() => setHoveredRuleId(rule.id)}
+                       onMouseLeave={() => setHoveredRuleId(prev => prev === rule.id ? null : prev)}
+                       style={{ cursor: "pointer" }}>
                       <title>{`${rule.label}\n${tip}`}</title>
                       {/* Invisible wide hit-area path so the edge is easy to click */}
                       <path d={d} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
@@ -4397,6 +4450,96 @@ export default function App() {
                   );
                 });
               });
+            })()}
+
+            {/* OP-TYPE PILLS — inline capsule pill at each rule's edge midpoint
+                showing the picking-type's sequence_code. Multi-pill stacking:
+                rules sharing the same (src, dst) get fanned perpendicular to the
+                edge; same-op duplicates within a group collapse to one pill.
+                In 'hidden' mode, only render pills for hovered or selected rules. */}
+            {(() => {
+              if (!data.operationTypes.length) return null;
+              const opById = new Map(data.operationTypes.map(o => [o.id, o]));
+              // Group rules by (src, dst) — pill fanning offset is per-group.
+              const groupBySrcDst = new Map();
+              for (const route of data.routes) {
+                if (hidden.has(route.id)) continue;
+                for (const rule of route.rules) {
+                  if (!rule.picking_type_id) continue;
+                  if (!opById.has(rule.picking_type_id)) continue;
+                  const sn = data.nodes.find(n => n.id === rule.src_location_id);
+                  const dn = data.nodes.find(n => n.id === rule.dest_location_id);
+                  if (!sn || !dn) continue;
+                  const key = `${rule.src_location_id}\t${rule.dest_location_id}`;
+                  if (!groupBySrcDst.has(key)) groupBySrcDst.set(key, []);
+                  groupBySrcDst.get(key).push({ rule, route });
+                }
+              }
+              // Within each group, dedupe by picking_type_id so two rules pointing at
+              // the same op show one pill. The first rule encountered owns the pill.
+              const renders = [];
+              const PILL_H = 16;
+              const PILL_PAD_X = 7;
+              const FANSTEP = PILL_H + 2;
+              for (const [, list] of groupBySrcDst) {
+                const seenOps = new Set();
+                const unique = [];
+                for (const entry of list) {
+                  if (seenOps.has(entry.rule.picking_type_id)) continue;
+                  seenOps.add(entry.rule.picking_type_id);
+                  unique.push(entry);
+                }
+                const n = unique.length;
+                unique.forEach((entry, i) => {
+                  const { rule } = entry;
+                  // In hidden mode, only render the pill for the hovered or selected rule
+                  const visible =
+                    opVizMode !== 'hidden' ||
+                    hoveredRuleId === rule.id ||
+                    sel?.id === rule.id ||
+                    sel?.id === rule.picking_type_id;
+                  if (!visible) return;
+                  const op = opById.get(rule.picking_type_id);
+                  const sn = data.nodes.find(nn => nn.id === rule.src_location_id);
+                  const dn = data.nodes.find(nn => nn.id === rule.dest_location_id);
+                  if (!op || !sn || !dn) return;
+                  const { sp, dp, ss, ds } = bestPorts(sn, dn);
+                  const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
+                  const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
+                  const curveOff = edgeOffsetMap.get(rule.id) ?? 0;
+                  const mid = bezierPoint(p1, p2, ss, ds, curveOff, 0.5);
+                  // Pill text width estimate (monospace ~6.2px/char at 10px font)
+                  const text = op.sequence_code || op.code || op.label?.slice(0, 4) || '?';
+                  const pillW = Math.max(20, Math.round(text.length * 6.4 + PILL_PAD_X * 2));
+                  // Stack offset perpendicular to edge — for now, vertical stacking
+                  const stackOff = (i - (n - 1) / 2) * FANSTEP;
+                  const px = mid.x - pillW / 2;
+                  const py = mid.y - PILL_H / 2 + stackOff;
+                  const fill = hashColor(op.id, 60, 35);
+                  const isHi = sel?.id === op.id || sel?.id === rule.id || hoveredRuleId === rule.id;
+                  renders.push(
+                    <g key={`pill-${rule.id}`}
+                       onClick={e => { e.stopPropagation(); doSelect(op.id); }}
+                       onMouseEnter={() => setHoveredRuleId(rule.id)}
+                       onMouseLeave={() => setHoveredRuleId(prev => prev === rule.id ? null : prev)}
+                       style={{ cursor: 'pointer' }}>
+                      <title>{`${op.label}${op.sequence_code ? ` · ${op.sequence_code}` : ''}\n${op.code || ''}`}</title>
+                      <rect x={px} y={py} width={pillW} height={PILL_H}
+                            rx={PILL_H / 2} ry={PILL_H / 2}
+                            fill={fill}
+                            stroke={isHi ? '#fff' : 'none'}
+                            strokeWidth={1} />
+                      <text x={mid.x} y={py + PILL_H / 2 + 1}
+                            fill="#fff" fontSize={10}
+                            textAnchor="middle" dominantBaseline="middle"
+                            style={{ fontFamily: "'IBM Plex Mono', monospace", pointerEvents: 'none', fontWeight: 600, letterSpacing: '0.5px' }}>
+                        {text}
+                      </text>
+                    </g>
+                  );
+                });
+              }
+              return renders;
             })()}
 
             {/* NODES */}
