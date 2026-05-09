@@ -520,42 +520,45 @@ const ACTION_META = {
 const L = (id, label, x, y, usage, extra = {}) => ({ id, type: "location", label, x, y, data: { complete_name: label, usage, scrap_location: false, replenish_location: false, removal_strategy: "fifo", barcode: "", ...extra }});
 const initData = () => ({
   nodes: [
-    { id: "wh1", type: "warehouse", label: "Main Warehouse", x: 40, y: 10, data: { code: "WH", name: "Main Warehouse", reception_steps: "three_steps", delivery_steps: "pick_pack_ship", buy_to_resupply: true, manufacture_to_resupply: true }},
-    // ── Partner locations
-    L("loc-vendors", "Vendors", 40, 160, "supplier"),
-    L("loc-customers", "Customers", 40, 700, "customer"),
-    // ── Inbound
-    L("loc-input", "WH/Input", 340, 130, "internal", { barcode: "WH-INPUT" }),
-    L("loc-qc", "WH/Quality Control", 580, 130, "internal", { barcode: "WH-QC" }),
+    // ── Main Warehouse (comp-1) — full receive→QC→stock + PPS + Manufacture + Crossdock setup.
+    { id: "wh1", type: "warehouse", label: "Main Warehouse", x: 76, y: 150, data: { code: "WH", name: "Main Warehouse", reception_steps: "three_steps", delivery_steps: "pick_pack_ship", buy_to_resupply: true, manufacture_to_resupply: true, company_id: "comp-1" } },
+    // ── Partner locations (shared across companies — no company_id)
+    L("loc-vendors", "Vendors", -103, 147, "supplier"),
+    L("loc-customers", "Customers", -107, 669, "customer"),
+    // ── Inbound (WH1 / comp-1)
+    L("loc-input", "WH/Input", 376, 270, "internal", { barcode: "WH-INPUT", company_id: "comp-1" }),
+    L("loc-qc", "WH/Quality Control", 616, 270, "internal", { barcode: "WH-QC", company_id: "comp-1" }),
     // ── Storage (top-level + sub-locations)
-    L("loc-stock", "WH/Stock", 770, 320, "internal", { barcode: "WH-STOCK" }),
-    // Sub-locations under WH/Stock — only visible in drill-in view (right-click → Open sub-locations).
-    // Each gets a storage_category and capacity to demonstrate the heatmap + simulator.
-    L("loc-stock-bulk",    "Bulk Stock",         900, 280, "internal", { barcode: "WH-STOCK-BULK",    location_id: "loc-stock", complete_name: "WH/Stock/Bulk",         storage_category_id: "cat-pallet", capacity_qty: 0,   capacity_packages: 24 }),
-    L("loc-stock-storage", "Storage Stock",      900, 340, "internal", { barcode: "WH-STOCK-STO",     location_id: "loc-stock", complete_name: "WH/Stock/Storage",      storage_category_id: "cat-bin",    capacity_qty: 500, capacity_packages: 0  }),
-    L("loc-stock-picking", "Picking Stock",      900, 400, "internal", { barcode: "WH-STOCK-PICK",    location_id: "loc-stock", complete_name: "WH/Stock/Picking",      storage_category_id: "cat-bin",    capacity_qty: 100, capacity_packages: 0  }),
-    L("loc-stock-cold",    "Cold Room",          900, 460, "internal", { barcode: "WH-STOCK-COLD",    location_id: "loc-stock", complete_name: "WH/Stock/Cold Room",    storage_category_id: "cat-cold",   capacity_qty: 200, capacity_packages: 0  }),
-    L("loc-stock-returns", "Returns Quarantine", 900, 520, "internal", { barcode: "WH-STOCK-RTN",     location_id: "loc-stock", complete_name: "WH/Stock/Returns",      storage_category_id: "",           capacity_qty: 50,  capacity_packages: 0  }),
+    L("loc-stock", "WH/Stock", 1036, 493, "internal", { barcode: "WH-STOCK", company_id: "comp-1" }),
+    L("loc-stock-bulk",    "Bulk Stock",         936, 420, "internal", { barcode: "WH-STOCK-BULK", location_id: "loc-stock", complete_name: "WH/Stock/Bulk",    storage_category_id: "cat-pallet", capacity_qty: 0,   capacity_packages: 24, company_id: "comp-1" }),
+    L("loc-stock-storage", "Storage Stock",     1161, 788, "internal", { barcode: "WH-STOCK-STO",  location_id: "loc-stock", complete_name: "WH/Stock/Storage", storage_category_id: "cat-bin",    capacity_qty: 500, capacity_packages: 0,  company_id: "comp-1" }),
+    L("loc-stock-picking", "Picking Stock",      885, 650, "internal", { barcode: "WH-STOCK-PICK", location_id: "loc-stock", complete_name: "WH/Stock/Picking", storage_category_id: "cat-bin",    capacity_qty: 100, capacity_packages: 0,  company_id: "comp-1" }),
+    L("loc-stock-cold",    "Cold Room",          749, 848, "internal", { barcode: "WH-STOCK-COLD", location_id: "loc-stock", complete_name: "WH/Stock/Cold Room", storage_category_id: "cat-cold", capacity_qty: 200, capacity_packages: 0,  company_id: "comp-1" }),
+    L("loc-stock-returns", "Returns Quarantine", 936, 660, "internal", { barcode: "WH-STOCK-RTN",  location_id: "loc-stock", complete_name: "WH/Stock/Returns", storage_category_id: "",           capacity_qty: 50,  capacity_packages: 0,  company_id: "comp-1" }),
     // ── Outbound
-    L("loc-output", "WH/Output", 340, 600, "internal", { barcode: "WH-OUTPUT" }),
-    L("loc-packing", "WH/Packing", 340, 480, "internal", { barcode: "WH-PACK" }),
+    L("loc-output", "WH/Output", 363, 830, "internal", { barcode: "WH-OUTPUT", company_id: "comp-1" }),
+    L("loc-packing", "WH/Packing", 376, 682, "internal", { barcode: "WH-PACK", company_id: "comp-1" }),
     // ── Production
-    L("loc-preprod", "WH/Pre-Production", 980, 160, "internal", { barcode: "WH-PREPROD" }),
-    L("loc-production", "Virtual/Production", 1160, 320, "production"),
+    L("loc-preprod", "WH/Pre-Production", 1016, 300, "internal", { barcode: "WH-PREPROD", company_id: "comp-1" }),
+    L("loc-production", "Virtual/Production", 1505, 375, "production"),
     // ── Crossdock
-    L("loc-crossdock", "WH/CrossDock", 580, 380, "internal", { barcode: "WH-XDOCK" }),
+    L("loc-crossdock", "WH/CrossDock", 276, 467, "internal", { barcode: "WH-XDOCK", company_id: "comp-1" }),
     // ── Inventory adjustments (loss + scrap) — virtual locations for stock corrections.
-    // Inventory Loss: usage='inventory' — the standard target for write-offs / surplus / count adjustments.
-    // Scrap: usage='inventory' with scrap_location=true — receives damaged goods written off.
-    L("loc-inv-loss", "Virtual/Inventory adjustment", 1160, 600, "inventory", { barcode: "WH-LOSS" }),
-    L("loc-scrap",    "Virtual/Scrap",                1160, 680, "inventory", { barcode: "WH-SCRAP", scrap_location: true }),
-    // ── Second warehouse (interwarehouse only — no vendor/customer flows).
-    // Resupplied from wh1 via Transit; sends back to wh1 via Transit. Demonstrates
-    // the two-sided resupply pattern that warehouse-presets emits.
-    { id: "wh2", type: "warehouse", label: "Secondary Warehouse", x: 1500, y: 10, data: { code: "WH2", name: "Secondary Warehouse", reception_steps: "one_step", delivery_steps: "ship_only", buy_to_resupply: false, manufacture_to_resupply: false } },
-    L("loc-wh2-stock", "WH2/Stock", 1620, 320, "internal", { barcode: "WH2-STOCK" }),
-    // Transit between the two warehouses — usage='transit', shared.
-    L("loc-transit-12", "Transit/WH ↔ WH2", 1280, 320, "transit", { barcode: "TRANSIT-WH-WH2" }),
+    L("loc-inv-loss", "Virtual/Inventory adjustment", 1505, 531, "inventory", { barcode: "WH-LOSS" }),
+    L("loc-scrap",    "Virtual/Scrap",                1505, 648, "inventory", { barcode: "WH-SCRAP", scrap_location: true }),
+    // ── Secondary Warehouse (comp-1) — interwarehouse only, no vendor/customer flows.
+    { id: "wh2", type: "warehouse", label: "Secondary Warehouse", x: 1733, y: -183, data: { code: "WH2", name: "Secondary Warehouse", reception_steps: "one_step", delivery_steps: "ship_only", buy_to_resupply: false, manufacture_to_resupply: false, company_id: "comp-1" } },
+    L("loc-wh2-stock", "WH2/Stock", 1853, 126, "internal", { barcode: "WH2-STOCK", company_id: "comp-1" }),
+    L("loc-transit-12", "Transit/WH ↔ WH2", 1489, 119, "transit", { barcode: "TRANSIT-WH-WH2" }),
+    // ── Tertiary Warehouse (comp-2) — different company! Connects to both WH and WH2
+    // through separate transit locations. Demonstrates cross-company filter +
+    // stub-edge rendering when one company is hidden.
+    { id: "wh3", type: "warehouse", label: "Tertiary Warehouse", x: 2200, y: -50, data: { code: "WH3", name: "Tertiary Warehouse", reception_steps: "one_step", delivery_steps: "ship_only", buy_to_resupply: false, manufacture_to_resupply: false, company_id: "comp-2" } },
+    L("loc-wh3-stock", "WH3/Stock", 2350, 200, "internal", { barcode: "WH3-STOCK", company_id: "comp-2" }),
+    // Inter-company transit locations stay shared (no company_id) so both
+    // companies can write to them.
+    L("loc-transit-13", "Transit/WH ↔ WH3",   1750, 500, "transit", { barcode: "TRANSIT-WH-WH3" }),
+    L("loc-transit-23", "Transit/WH2 ↔ WH3", 2050, 100, "transit", { barcode: "TRANSIT-WH2-WH3" }),
   ],
   operationTypes: [
     // Inbound
@@ -601,23 +604,42 @@ const initData = () => ({
       sequence_code: "IWI2", src_location_id: "loc-transit-12", dest_location_id: "loc-stock",
       data: { name: "Inter-warehouse receipt (WH ← WH2)", code: "incoming", sequence_code: "IWI2", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true },
       __autoGen: { warehouseId: "wh1", source: "resupply:wh2" } },
+    // ── Inter-warehouse op-types — WH ↔ WH3 (cross-company: comp-1 ↔ comp-2).
+    { id: "op-iw-out-13", label: "WH → WH3 (out)", code: "internal",  sequence_code: "IWO3",  src_location_id: "loc-stock",       dest_location_id: "loc-transit-13", data: { name: "Inter-WH delivery (WH → WH3)", code: "internal", sequence_code: "IWO3", create_backorder: "ask",   reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true,  show_reserved: true,  company_id: "comp-1" }, __autoGen: { warehouseId: "wh1", source: "resupply:wh3" } },
+    { id: "op-iw-in-13",  label: "WH3 ← WH (in)",  code: "incoming",  sequence_code: "IWI3",  src_location_id: "loc-transit-13",  dest_location_id: "loc-wh3-stock",  data: { name: "Inter-WH receipt (WH3 ← WH)",  code: "incoming", sequence_code: "IWI3", create_backorder: "ask",   reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true,  show_reserved: true,  company_id: "comp-2" }, __autoGen: { warehouseId: "wh3", source: "resupply:wh1" } },
+    { id: "op-iw-out-31", label: "WH3 → WH (out)", code: "internal",  sequence_code: "IWO31", src_location_id: "loc-wh3-stock",   dest_location_id: "loc-transit-13", data: { name: "Inter-WH delivery (WH3 → WH)", code: "internal", sequence_code: "IWO31", create_backorder: "ask",  reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true,  show_reserved: true,  company_id: "comp-2" }, __autoGen: { warehouseId: "wh3", source: "resupply:wh1" } },
+    { id: "op-iw-in-31",  label: "WH ← WH3 (in)",  code: "incoming",  sequence_code: "IWI31", src_location_id: "loc-transit-13",  dest_location_id: "loc-stock",      data: { name: "Inter-WH receipt (WH ← WH3)",  code: "incoming", sequence_code: "IWI31", create_backorder: "ask",  reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true,  show_reserved: true,  company_id: "comp-1" }, __autoGen: { warehouseId: "wh1", source: "resupply:wh3" } },
+    // ── Inter-warehouse op-types — WH2 ↔ WH3 (cross-company: comp-1 ↔ comp-2).
+    { id: "op-iw-out-23", label: "WH2 → WH3 (out)", code: "internal", sequence_code: "IWO23", src_location_id: "loc-wh2-stock",   dest_location_id: "loc-transit-23", data: { name: "Inter-WH delivery (WH2 → WH3)", code: "internal", sequence_code: "IWO23", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true,  company_id: "comp-1" }, __autoGen: { warehouseId: "wh2", source: "resupply:wh3" } },
+    { id: "op-iw-in-23",  label: "WH3 ← WH2 (in)",  code: "incoming", sequence_code: "IWI23", src_location_id: "loc-transit-23",  dest_location_id: "loc-wh3-stock",  data: { name: "Inter-WH receipt (WH3 ← WH2)",  code: "incoming", sequence_code: "IWI23", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true,  company_id: "comp-2" }, __autoGen: { warehouseId: "wh3", source: "resupply:wh2" } },
+    { id: "op-iw-out-32", label: "WH3 → WH2 (out)", code: "internal", sequence_code: "IWO32", src_location_id: "loc-wh3-stock",   dest_location_id: "loc-transit-23", data: { name: "Inter-WH delivery (WH3 → WH2)", code: "internal", sequence_code: "IWO32", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true,  company_id: "comp-2" }, __autoGen: { warehouseId: "wh3", source: "resupply:wh2" } },
+    { id: "op-iw-in-32",  label: "WH2 ← WH3 (in)",  code: "incoming", sequence_code: "IWI32", src_location_id: "loc-transit-23",  dest_location_id: "loc-wh2-stock",  data: { name: "Inter-WH receipt (WH2 ← WH3)",  code: "incoming", sequence_code: "IWI32", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true,  company_id: "comp-1" }, __autoGen: { warehouseId: "wh2", source: "resupply:wh3" } },
+    // ── Dropship — vendor ships directly to customer, bypasses any warehouse.
+    // Standard Odoo "Dropship" picking type: code='outgoing' (it's a sale fulfilment),
+    // src=Vendors, dst=Customers. Selectable on products + sales orders via the
+    // Dropship route (see route-dropship below).
+    { id: "op-dropship", label: "Dropship", code: "outgoing", sequence_code: "DS", src_location_id: "loc-vendors", dest_location_id: "loc-customers", data: { name: "Dropship", code: "outgoing", sequence_code: "DS", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: true, use_existing_lots: false, show_reserved: false, company_id: "comp-1" } },
   ],
   routes: [
     // ── Receive in 3 steps (Input → QC → Stock)
     { id: "route-recv3", label: "Receive 3 steps (Input→QC→Stock)", colorIdx: 0,
-      data: { name: "WH: Receive in 3 steps", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, },
+      data: { name: "WH: Receive in 3 steps", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false, company_id: "comp-1" },
       rules: [
         { id: "rl-r3a", label: "Vendors → Input", action: "pull", procure_method: "make_to_order", src_location_id: "loc-vendors", dest_location_id: "loc-input", picking_type_id: "op-receipt", auto: "manual", data: { name: "Vendors → Input", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 }},
         { id: "rl-r3b", label: "Input → QC", action: "pull", procure_method: "make_to_order", src_location_id: "loc-input", dest_location_id: "loc-qc", picking_type_id: "op-qc", auto: "manual", data: { name: "Input → QC", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 }},
         { id: "rl-r3c", label: "QC → Stock", action: "pull", procure_method: "make_to_stock", src_location_id: "loc-qc", dest_location_id: "loc-stock", picking_type_id: "op-store", auto: "manual", data: { name: "QC → Stock", action: "pull", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0 }},
+        // Push QC → Picking Stock for fast-mover items (manual demo addition).
+        { id: "rl-r3d", label: "QC → Picking Stock", action: "push", procure_method: "make_to_stock", src_location_id: "loc-qc", dest_location_id: "loc-stock-picking", picking_type_id: "op-store", auto: "manual", data: { name: "QC → Picking Stock", action: "push", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0 } },
       ]},
     // ── Pick-Pack-Ship (web orders)
     { id: "route-pps", label: "Pick → Pack → Ship (Web)", colorIdx: 1,
-      data: { name: "WH: Pick Pack Ship", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: true, },
+      data: { name: "WH: Pick Pack Ship", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: true, company_id: "comp-1" },
       rules: [
         { id: "rl-pps1", label: "Stock → Packing", action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock", dest_location_id: "loc-packing", picking_type_id: "op-pick", auto: "manual", data: { name: "Stock → Packing", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
         { id: "rl-pps2", label: "Packing → Output", action: "pull", procure_method: "make_to_order", src_location_id: "loc-packing", dest_location_id: "loc-output", picking_type_id: "op-pack", auto: "manual", data: { name: "Packing → Output", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
         { id: "rl-pps3", label: "Output → Customers", action: "pull", procure_method: "make_to_order", src_location_id: "loc-output", dest_location_id: "loc-customers", picking_type_id: "op-delivery", auto: "manual", data: { name: "Output → Customers", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0 }},
+        // Cold-Room → Packing direct pull for cold-chain web orders (manual demo addition).
+        { id: "rl-pps4", label: "Cold Room → Packing", action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock-cold", dest_location_id: "loc-packing", picking_type_id: "op-fastpick", auto: "manual", data: { name: "Cold Room → Packing", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 0 } },
       ]},
     // ── Production (with picking step)
     { id: "route-prod", label: "Manufacture (with picking)", colorIdx: 2,
@@ -674,11 +696,54 @@ const initData = () => ({
         { id: "rl-iw-in-1",  label: "Transit → WH2/Stock",    action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-12",   dest_location_id: "loc-wh2-stock",   picking_type_id: "op-iw-in",   auto: "transparent", data: { name: "Transit → WH2",            action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
       ] },
     { id: "route-iw-21", label: "Resupply WH from WH2", colorIdx: 8,
-      data: { name: "Inter-WH: WH2 → WH", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false },
+      data: { name: "Inter-WH: WH2 → WH", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false, company_id: "comp-1" },
       __autoGen: { warehouseId: "wh1", source: "resupply:wh2" },
       rules: [
         { id: "rl-iw-out-2", label: "WH2/Stock → Transit",    action: "pull", procure_method: "make_to_order", src_location_id: "loc-wh2-stock",    dest_location_id: "loc-transit-12",  picking_type_id: "op-iw-out-2", auto: "manual",      data: { name: "WH2 → Transit",            action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
         { id: "rl-iw-in-2",  label: "Transit → WH/Stock",     action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-12",   dest_location_id: "loc-stock",       picking_type_id: "op-iw-in-2",  auto: "transparent", data: { name: "Transit → WH",             action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
+      ] },
+
+    // ── Inter-warehouse Resupply (WH ↔ WH3) — cross-company (comp-1 ↔ comp-2).
+    // Demonstrates the cross-company stub-edge rendering: when company filter
+    // is set to a single company, the rules touching the OTHER company's
+    // warehouse render as faded "to <Other Company>" stubs.
+    { id: "route-iw-13", label: "Resupply WH3 from WH", colorIdx: 0,
+      data: { name: "Inter-WH: WH → WH3 (cross-company)", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false, company_id: "comp-1" },
+      __autoGen: { warehouseId: "wh3", source: "resupply:wh1" },
+      rules: [
+        { id: "rl-iw-out-13", label: "WH/Stock → Transit",   action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock",       dest_location_id: "loc-transit-13", picking_type_id: "op-iw-out-13", auto: "manual",      data: { name: "WH → Transit (to WH3)",  action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-13",  label: "Transit → WH3/Stock",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-13",  dest_location_id: "loc-wh3-stock",  picking_type_id: "op-iw-in-13",  auto: "transparent", data: { name: "Transit → WH3",          action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 2 } },
+      ] },
+    { id: "route-iw-31", label: "Resupply WH from WH3", colorIdx: 1,
+      data: { name: "Inter-WH: WH3 → WH (cross-company)", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false, company_id: "comp-2" },
+      __autoGen: { warehouseId: "wh1", source: "resupply:wh3" },
+      rules: [
+        { id: "rl-iw-out-31", label: "WH3/Stock → Transit",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-wh3-stock",   dest_location_id: "loc-transit-13", picking_type_id: "op-iw-out-31", auto: "manual",      data: { name: "WH3 → Transit (to WH)",  action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-31",  label: "Transit → WH/Stock",   action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-13",  dest_location_id: "loc-stock",      picking_type_id: "op-iw-in-31",  auto: "transparent", data: { name: "Transit → WH (from WH3)", action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 2 } },
+      ] },
+    // ── Inter-warehouse Resupply (WH2 ↔ WH3) — also cross-company.
+    { id: "route-iw-23", label: "Resupply WH3 from WH2", colorIdx: 2,
+      data: { name: "Inter-WH: WH2 → WH3 (cross-company)", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false, company_id: "comp-1" },
+      __autoGen: { warehouseId: "wh3", source: "resupply:wh2" },
+      rules: [
+        { id: "rl-iw-out-23", label: "WH2/Stock → Transit",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-wh2-stock",   dest_location_id: "loc-transit-23", picking_type_id: "op-iw-out-23", auto: "manual",      data: { name: "WH2 → Transit (to WH3)",  action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-23",  label: "Transit → WH3/Stock",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-23",  dest_location_id: "loc-wh3-stock",  picking_type_id: "op-iw-in-23",  auto: "transparent", data: { name: "Transit → WH3 (from WH2)", action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
+      ] },
+    { id: "route-iw-32", label: "Resupply WH2 from WH3", colorIdx: 3,
+      data: { name: "Inter-WH: WH3 → WH2 (cross-company)", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false, company_id: "comp-2" },
+      __autoGen: { warehouseId: "wh2", source: "resupply:wh3" },
+      rules: [
+        { id: "rl-iw-out-32", label: "WH3/Stock → Transit",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-wh3-stock",   dest_location_id: "loc-transit-23", picking_type_id: "op-iw-out-32", auto: "manual",      data: { name: "WH3 → Transit (to WH2)",  action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-32",  label: "Transit → WH2/Stock",  action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-23",  dest_location_id: "loc-wh2-stock",  picking_type_id: "op-iw-in-32",  auto: "transparent", data: { name: "Transit → WH2 (from WH3)", action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
+      ] },
+
+    // ── Dropship — vendor → customer direct, no warehouse. Standard Odoo
+    // pattern: action='buy' (procurement triggers a PO) on a route selectable
+    // from products/SOs. Visualises as a single edge from Vendors to Customers.
+    { id: "route-dropship", label: "Dropship", colorIdx: 4,
+      data: { name: "Dropship", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: false, sale_selectable: true, company_id: "comp-1" },
+      rules: [
+        { id: "rl-dropship", label: "Vendors → Customers (dropship)", action: "buy", procure_method: "make_to_order", src_location_id: "loc-vendors", dest_location_id: "loc-customers", picking_type_id: "op-dropship", auto: "manual", data: { name: "Dropship", action: "buy", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 5 } },
       ] },
 
     // ── Cold-Chain Storage (push rule with domain — perishables route past QC into Cold Room)
@@ -753,6 +818,7 @@ const initData = () => ({
   ],
   companies: [
     { id: "comp-1", name: "Main Company" },
+    { id: "comp-2", name: "Tertiary Co" },
   ],
 });
 
