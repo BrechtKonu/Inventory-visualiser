@@ -5,6 +5,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { presetGenerator, presetDiff } from "./src/warehouse-presets.js";
 import { exportMarkdown } from "./src/markdown-exporter.js";
+import { simulatePutaway } from "./src/putaway-simulator.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
 const DARK_THEME = {
@@ -1921,19 +1922,65 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     })),
   }));
 
-  // 8. Putaway rules
+  // 8. Storage categories (best-effort: model exists in stock module from Odoo 16+)
+  let storageCategories = [];
+  let catMap = new Map();
+  try {
+    onProgress("Fetching storage categories…");
+    const cats = await sr("stock.storage.category", [], ["name", "allow_new_product", "max_weight"]);
+    storageCategories = cats.map(c => ({
+      id: `cat-${c.id}`,
+      name: c.name,
+      allow_new_product: c.allow_new_product || "mixed_products",
+      max_weight: c.max_weight || 0,
+      capacity_qty: 0, // capacity_ids o2m fetch deferred — leave 0 until a per-product capacity UI lands
+    }));
+    catMap = new Map(cats.map(c => [c.id, `cat-${c.id}`]));
+  } catch (e) {
+    // Module may be absent on customer installs; degrade silently.
+    console.warn("storage_category fetch skipped:", e?.message || e);
+  }
+
+  // 9. Putaway rules
   const putawayRules = putaway.map(p => ({
     id: `pa-${p.id}`,
     location_in_id: locMap.get(rid(p.location_in_id)) || "",
-    location_out: rname(p.location_out_id),
+    location_out_id: locMap.get(rid(p.location_out_id)) || "",  // m2o → app id
+    location_out: rname(p.location_out_id),                       // legacy display string
     product: rname(p.product_id),
     category: rname(p.category_id),
     sequence: p.sequence ?? 99,
     storage_strategy: p.storage_strategy || "manual_no_strategy",
-    storage_category_id: rname(p.storage_category_id) || "",
+    storage_category_id: catMap.get(rid(p.storage_category_id)) || rname(p.storage_category_id) || "",
   }));
 
-  const data = { nodes: [...warehouseNodes, ...locationNodes], operationTypes, routes: appRoutes, putawayRules };
+  // 10. Quants — aggregate per location for the heatmap. Best-effort, fetches on every
+  //     full inventory pull. Light: only `location_id` and `quantity`.
+  let _quantsByLocation = {};
+  try {
+    onProgress("Fetching stock quants for heatmap…");
+    const quants = await fetchAll(
+      "stock.quant",
+      [["location_id.usage", "=", "internal"], ["quantity", ">", 0]],
+      ["location_id", "quantity"], 1000,
+      n => onProgress(`Fetching quants… (${n})`),
+    );
+    for (const q of quants) {
+      const lid = rid(q.location_id);
+      const appId = locMap.get(lid);
+      if (!appId) continue;
+      _quantsByLocation[appId] = (_quantsByLocation[appId] || 0) + (q.quantity || 0);
+    }
+  } catch (e) {
+    console.warn("quant fetch skipped:", e?.message || e);
+  }
+
+  const data = {
+    nodes: [...warehouseNodes, ...locationNodes],
+    operationTypes, routes: appRoutes, putawayRules,
+    storageCategories,
+    _quantsByLocation,
+  };
   return { data, userContext: session.user_context || {} };
 }
 
@@ -2221,6 +2268,139 @@ const CommandPalette = ({ commands, onClose }) => {
   );
 };
 
+// ─── STORAGE CATEGORY MODAL ─────────────────────────────────────────────
+// CRUD over data.storageCategories. Each row: name | allow_new_product |
+// max_weight | capacity_qty | × delete. + Add row at bottom.
+const StorageCategoryModal = ({ categories, onUpdate, onClose }) => {
+  const [items, setItems] = useState(() => categories.map(c => ({ ...c })));
+  const setField = (idx, key, value) => setItems(arr => arr.map((c, i) => i === idx ? { ...c, [key]: value } : c));
+  const addRow = () => setItems(arr => [...arr, {
+    id: `cat-${Math.random().toString(36).slice(2, 8)}`,
+    name: 'New category', allow_new_product: 'mixed_products',
+    max_weight: 0, capacity_qty: 0,
+  }]);
+  const delRow = (idx) => setItems(arr => arr.filter((_, i) => i !== idx));
+  const save = () => { onUpdate(items); onClose(); };
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onClose}>
+      <div style={{ width: 720, maxHeight: "82vh", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Storage categories</span>
+          <Btn variant="ghost" small icon="close" onClick={onClose} />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: T.textDim, fontWeight: 600 }}>Name</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: T.textDim, fontWeight: 600 }}>Allow new product</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: T.textDim, fontWeight: 600 }}>Max weight (kg)</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: T.textDim, fontWeight: 600 }}>Capacity qty</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((c, i) => (
+                <tr key={c.id} style={{ borderBottom: `1px solid ${T.border}55` }}>
+                  <td style={{ padding: "4px 8px" }}>
+                    <input value={c.name} onChange={e => setField(i, 'name', e.target.value)}
+                      style={{ width: "100%", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "inherit" }} />
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>
+                    <select value={c.allow_new_product || 'mixed_products'} onChange={e => setField(i, 'allow_new_product', e.target.value)}
+                      style={{ width: "100%", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "inherit" }}>
+                      <option value="mixed_products">Mixed products</option>
+                      <option value="same_product">Same product</option>
+                      <option value="only_empty">Only when empty</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>
+                    <input type="number" value={c.max_weight ?? 0} onChange={e => setField(i, 'max_weight', parseFloat(e.target.value) || 0)}
+                      style={{ width: 80, background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" }} />
+                  </td>
+                  <td style={{ padding: "4px 8px" }}>
+                    <input type="number" value={c.capacity_qty ?? 0} onChange={e => setField(i, 'capacity_qty', parseFloat(e.target.value) || 0)}
+                      style={{ width: 80, background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" }} />
+                  </td>
+                  <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                    <button onClick={() => delRow(i)} title="Delete category"
+                      style={{ background: "transparent", border: "none", color: T.red, fontSize: 14, cursor: "pointer" }}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={addRow}
+            style={{ marginTop: 8, padding: "5px 12px", background: T.accentSoft, color: T.accent, border: `1px solid ${T.accent}55`, borderRadius: 4, fontSize: 11, fontFamily: "inherit", cursor: "pointer" }}>+ Add category</button>
+        </div>
+        <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
+          <Btn variant="primary" small onClick={save}>Save</Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── TEST PUTAWAY MODAL ─────────────────────────────────────────────────
+// Drill-in only: punch in product/category/qty, see simulator trace + result.
+const TestPutawayModal = ({ data, locationId, onClose, simulate }) => {
+  const [product, setProduct] = useState('');
+  const [category, setCategory] = useState('');
+  const [qty, setQty] = useState(1);
+  const result = useMemo(() => simulate(data, {
+    product: product.trim(), category: category.trim(),
+    location_in_id: locationId, qty: parseFloat(qty) || 0,
+  }), [data, locationId, product, category, qty, simulate]);
+  const targetNode = result.resolvedLocationId ? data.nodes.find(n => n.id === result.resolvedLocationId) : null;
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110, fontFamily: "'IBM Plex Sans', sans-serif" }} onClick={onClose}>
+      <div style={{ width: 540, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Test putaway · {data.nodes.find(n => n.id === locationId)?.label || locationId}</span>
+          <Btn variant="ghost" small icon="close" onClick={onClose} />
+        </div>
+        <div style={{ padding: 14, fontSize: 11 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 8, marginBottom: 14 }}>
+            <label style={{ color: T.textDim, alignSelf: "center" }}>Product</label>
+            <input value={product} onChange={e => setProduct(e.target.value)} placeholder="e.g. Office Desk"
+              style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }} />
+            <label style={{ color: T.textDim, alignSelf: "center" }}>Category</label>
+            <input value={category} onChange={e => setCategory(e.target.value)} placeholder="e.g. Electronics"
+              style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "5px 8px", borderRadius: 4, fontFamily: "inherit" }} />
+            <label style={{ color: T.textDim, alignSelf: "center" }}>Quantity</label>
+            <input type="number" value={qty} onChange={e => setQty(e.target.value)}
+              style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "5px 8px", borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", width: 100 }} />
+          </div>
+          <div style={{ background: T.surfaceHover, borderRadius: 5, padding: "10px 12px", marginBottom: 10 }}>
+            <div style={{ color: T.textDim, fontSize: 10, marginBottom: 6, fontFamily: "'IBM Plex Mono', monospace" }}>Trace</div>
+            {result.trace.length === 0 && <div style={{ color: T.textDim, fontStyle: "italic" }}>(enter inputs above)</div>}
+            {result.trace.map((step, i) => (
+              <div key={i} style={{ color: T.text, fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, marginBottom: 2 }}>{step}</div>
+            ))}
+          </div>
+          <div style={{ padding: "10px 12px", borderRadius: 5,
+            background: result.capacityCheck === 'ok' ? T.greenSoft :
+                        result.capacityCheck === 'over' ? T.amberSoft : T.surfaceHover,
+            border: `1px solid ${result.capacityCheck === 'over' ? T.amber : T.border}` }}>
+            <div style={{ fontWeight: 700, color:
+              result.capacityCheck === 'ok' ? T.green :
+              result.capacityCheck === 'over' ? T.amber : T.text }}>
+              {targetNode
+                ? `${result.capacityCheck === 'over' ? '✕' : '✓'} ${targetNode.label}`
+                : '— no resolution'}
+            </div>
+            <div style={{ color: T.textDim, marginTop: 4 }}>{result.reason}</div>
+          </div>
+        </div>
+        <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "flex-end" }}>
+          <Btn variant="primary" small onClick={onClose}>Close</Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── CONNECT-TARGET MODAL (drag-from-port) ──────────────────────────────────
 // Tiny modal: pick a route + action and create a rule with src/dest pre-filled.
 const ConnectModal = ({ srcLabel, dstLabel, routes, onCreate, onCreateInNewRoute, onClose }) => {
@@ -2332,6 +2512,8 @@ export default function App() {
   const [drillShowPutaway, setDrillShowPutaway] = useState(true);
   const [drillShowCategories, setDrillShowCategories] = useState(true);
   const [drillShowHeatmap, setDrillShowHeatmap] = useState(false);
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [showTestPutaway, setShowTestPutaway] = useState(false);
   const svgRef = useRef(null);
   const importRef = useRef(null);
   const historyRef = useRef([]);
@@ -4269,6 +4451,12 @@ export default function App() {
                   style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: T.textDim, cursor: "pointer" }}>
                   <input type="checkbox" checked={drillShowHeatmap} onChange={e => setDrillShowHeatmap(e.target.checked)} /> Heatmap
                 </label>
+                <button onClick={() => setShowCategoriesModal(true)} title="Manage storage categories"
+                  style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text,
+                    fontSize: 10, padding: "3px 8px", borderRadius: 3, fontFamily: "inherit", cursor: "pointer" }}>📁 Categories…</button>
+                <button onClick={() => setShowTestPutaway(true)} title="Simulate putaway resolution at this location"
+                  style={{ background: T.accentSoft, border: `1px solid ${T.accent}55`, color: T.accent,
+                    fontSize: 10, padding: "3px 8px", borderRadius: 3, fontFamily: "inherit", cursor: "pointer" }}>▶ Test putaway</button>
               </div>
             );
           })()}
@@ -5281,6 +5469,19 @@ export default function App() {
 
       {/* MODALS */}
       {showCfg && <CfgModal cfg={apiCfg} onChange={setApiCfg} onClose={() => setShowCfg(false)} />}
+      {showCategoriesModal && <StorageCategoryModal
+        categories={data.storageCategories || []}
+        onUpdate={(items) => setData(p => {
+          historyRef.current = [...historyRef.current.slice(-49), p];
+          futureRef.current = [];
+          setCanUndo(true); setCanRedo(false);
+          return { ...p, storageCategories: items };
+        })}
+        onClose={() => setShowCategoriesModal(false)} />}
+      {showTestPutaway && drillInto && <TestPutawayModal
+        data={data} locationId={drillInto}
+        simulate={simulatePutaway}
+        onClose={() => setShowTestPutaway(false)} />}
       {showAdd && <AddModal onAdd={(type) => {
         if (type === 'warehouse') {
           setShowAdd(false);
