@@ -520,4 +520,39 @@ it('simulatePutaway: no rules → null match', () => {
   assert.equal(r.resolvedLocationId, null);
 });
 
+it('simulatePutaway: per-product capacity from storage category wins over location capacity', () => {
+  const data = simData();
+  // Add a storage category with a per-product capacity for Office Desk = 1
+  data.storageCategories = [
+    { id: 'cat-pallet', name: 'Pallet', allow_new_product: 'same_product', max_weight: 500, capacity_qty: 1,
+      capacity_ids: [{ product: 'Office Desk', qty: 1 }] },
+  ];
+  // Tag shelf-a with the category. Override its capacity_qty so we can prove
+  // the per-product rule wins over the location's own capacity.
+  data.nodes = data.nodes.map(n => n.id === 'shelf-a'
+    ? { ...n, data: { ...n.data, storage_category_id: 'cat-pallet', capacity_qty: 999 } }
+    : n);
+  data._quantsByLocation = { 'shelf-a': 0 };
+  // Putting 2 desks in a 1-cap-per-product slot → over.
+  const r = simulatePutaway(data, { product: 'Office Desk', category: '', location_in_id: 'wh-stock', qty: 2 });
+  assert.equal(r.capacityCheck, 'over');
+  assert.equal(r.capacityQty, 1);
+  // And the trace mentions the per-product source.
+  assert.ok(r.trace.some(t => t.includes('per-product capacity')), `trace should mention per-product capacity. got: ${r.trace.join(' | ')}`);
+});
+
+it('simulatePutaway: falls back to category default when no per-product entry', () => {
+  const data = simData();
+  data.storageCategories = [
+    { id: 'cat-bin', name: 'Bin', allow_new_product: 'mixed_products', max_weight: 50, capacity_qty: 50, capacity_ids: [] },
+  ];
+  data.nodes = data.nodes.map(n => n.id === 'shelf-b'
+    ? { ...n, data: { ...n.data, storage_category_id: 'cat-bin', capacity_qty: 999 } }
+    : n);
+  data._quantsByLocation = { 'shelf-b': 40 };
+  const r = simulatePutaway(data, { product: 'Random', category: 'Electronics', location_in_id: 'wh-stock', qty: 5 });
+  assert.equal(r.capacityQty, 50, 'should use category default 50, not location 999');
+  assert.equal(r.capacityCheck, 'ok'); // 40 + 5 = 45 < 50
+});
+
 await flush();

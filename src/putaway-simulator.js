@@ -135,8 +135,35 @@ export function simulatePutaway(data, ctx) {
   out.resolvedLocationId = chosenId;
 
   // Capacity check.
+  // Resolution order (Odoo-faithful):
+  //   1. If the location has a storage_category_id and that category has a
+  //      capacity_ids entry for ctx.product, use that product-specific qty.
+  //   2. Else if the category has its own default capacity_qty, use that.
+  //   3. Else use the location's own capacity_qty (legacy capacity field
+  //      as final fallback).
   const chosenNode = (data.nodes || []).find(n => n.id === chosenId);
-  const cap = chosenNode?.data?.capacity_qty || chosenNode?.data?.capacity || null;
+  const catId = chosenNode?.data?.storage_category_id;
+  const cat = catId ? (data.storageCategories || []).find(c => c.id === catId) : null;
+  let cap = null;
+  if (cat) {
+    if (Array.isArray(cat.capacity_ids) && ctx.product) {
+      const perProduct = cat.capacity_ids.find(c =>
+        c.product === ctx.product ||
+        (c.product || '').toLowerCase().includes((ctx.product || '').toLowerCase()));
+      if (perProduct && perProduct.qty != null) {
+        cap = perProduct.qty;
+        trace.push(`step 5: per-product capacity from '${cat.name}' (${ctx.product}) → ${cap}`);
+      }
+    }
+    if (cap === null && cat.capacity_qty) {
+      cap = cat.capacity_qty;
+      trace.push(`step 5: category '${cat.name}' default capacity → ${cap}`);
+    }
+  }
+  if (cap === null) {
+    cap = chosenNode?.data?.capacity_qty || chosenNode?.data?.capacity || null;
+    if (cap !== null) trace.push(`step 5: location capacity → ${cap}`);
+  }
   const currentRaw = data._quantsByLocation?.[chosenId];
   const current = currentRaw ?? null;
   if (cap !== null && current !== null) {

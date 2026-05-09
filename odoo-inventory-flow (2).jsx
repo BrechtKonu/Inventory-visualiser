@@ -524,8 +524,15 @@ const initData = () => ({
     // ── Inbound
     L("loc-input", "WH/Input", 340, 130, "internal", { barcode: "WH-INPUT" }),
     L("loc-qc", "WH/Quality Control", 580, 130, "internal", { barcode: "WH-QC" }),
-    // ── Storage
+    // ── Storage (top-level + sub-locations)
     L("loc-stock", "WH/Stock", 770, 320, "internal", { barcode: "WH-STOCK" }),
+    // Sub-locations under WH/Stock — only visible in drill-in view (right-click → Open sub-locations).
+    // Each gets a storage_category and capacity to demonstrate the heatmap + simulator.
+    L("loc-stock-bulk",    "Bulk Stock",         900, 280, "internal", { barcode: "WH-STOCK-BULK",    location_id: "loc-stock", complete_name: "WH/Stock/Bulk",         storage_category_id: "cat-pallet", capacity_qty: 0,   capacity_packages: 24 }),
+    L("loc-stock-storage", "Storage Stock",      900, 340, "internal", { barcode: "WH-STOCK-STO",     location_id: "loc-stock", complete_name: "WH/Stock/Storage",      storage_category_id: "cat-bin",    capacity_qty: 500, capacity_packages: 0  }),
+    L("loc-stock-picking", "Picking Stock",      900, 400, "internal", { barcode: "WH-STOCK-PICK",    location_id: "loc-stock", complete_name: "WH/Stock/Picking",      storage_category_id: "cat-bin",    capacity_qty: 100, capacity_packages: 0  }),
+    L("loc-stock-cold",    "Cold Room",          900, 460, "internal", { barcode: "WH-STOCK-COLD",    location_id: "loc-stock", complete_name: "WH/Stock/Cold Room",    storage_category_id: "cat-cold",   capacity_qty: 200, capacity_packages: 0  }),
+    L("loc-stock-returns", "Returns Quarantine", 900, 520, "internal", { barcode: "WH-STOCK-RTN",     location_id: "loc-stock", complete_name: "WH/Stock/Returns",      storage_category_id: "",           capacity_qty: 50,  capacity_packages: 0  }),
     // ── Outbound
     L("loc-output", "WH/Output", 340, 600, "internal", { barcode: "WH-OUTPUT" }),
     L("loc-packing", "WH/Packing", 340, 480, "internal", { barcode: "WH-PACK" }),
@@ -551,6 +558,8 @@ const initData = () => ({
     // Crossdock
     { id: "op-crossdock", label: "CrossDock", code: "internal", sequence_code: "XD", src_location_id: "loc-input", dest_location_id: "loc-crossdock", data: { name: "CrossDock Transfer", code: "internal", sequence_code: "XD", create_backorder: "never", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
     { id: "op-xd-out", label: "XD Ship", code: "outgoing", sequence_code: "XDS", src_location_id: "loc-crossdock", dest_location_id: "loc-customers", data: { name: "CrossDock Ship", code: "outgoing", sequence_code: "XDS", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
+    // Internal replenishment (Storage Stock → Picking Stock) — sub-location-level transfer
+    { id: "op-replenish", label: "Internal Replenishment", code: "internal", sequence_code: "REP", src_location_id: "loc-stock-storage", dest_location_id: "loc-stock-picking", data: { name: "Storage → Picking replenishment", code: "internal", sequence_code: "REP", create_backorder: "never", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
   ],
   routes: [
     // ── Receive in 3 steps (Input → QC → Stock)
@@ -590,34 +599,62 @@ const initData = () => ({
       rules: [
         { id: "rl-buy1", label: "Buy → Input", action: "buy", procure_method: "make_to_order", src_location_id: "loc-vendors", dest_location_id: "loc-input", picking_type_id: "op-receipt", auto: "manual", data: { name: "Buy", action: "buy", procure_method: "make_to_order", auto: "manual", propagate_cancel: false, delay: 3 }},
       ]},
+    // ── Internal Replenishment (sub-locations Storage → Picking)
+    // Demonstrates the "sub-locations as rule src/dst" feature: this rule's
+    // src and dst are real sub-location nodes; main canvas renders the edge
+    // between WH/Stock (parent) and adds a small badge "[Storage→Picking]";
+    // drill-into WH/Stock to see the actual sub-edge.
+    { id: "route-replenish", label: "Internal Replenishment", colorIdx: 5,
+      data: { name: "WH: Replenish picking from storage", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: false, sale_selectable: false },
+      rules: [
+        { id: "rl-replenish1", label: "Storage → Picking", action: "pull", procure_method: "make_to_stock", src_location_id: "loc-stock-storage", dest_location_id: "loc-stock-picking", picking_type_id: "op-replenish", auto: "manual",
+          data: { name: "Replenish picking zone", action: "pull", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0,
+                  domain: "[('product_id.qty_available', '<', 10)]" }},
+      ]},
   ],
-  // ── Putaway rules (separate from canvas nodes) ── 
+  // ── Putaway rules (separate from canvas nodes) ──
+  // Showcasing both modern (location_out_id m2o → real sub-location node) and
+  // legacy (location_out string → phantom sub-location) styles so users see
+  // the coexistence pattern.
   putawayRules: [
-    // WH/Stock — shelf assignments
-    { id: "pa-1", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf A/Bin 1", product: "FURN_7800 Office Desk", category: "", sequence: 1 },
-    { id: "pa-2", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf A/Bin 2", product: "FURN_7801 Standing Desk", category: "", sequence: 2 },
-    { id: "pa-3", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf A/Bin 3", product: "FURN_8999 Ergonomic Chair", category: "", sequence: 3 },
-    { id: "pa-4", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf B", product: "", category: "Electronics", sequence: 5 },
-    { id: "pa-5", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf B/Bin 1", product: "ELEC_001 Laptop 15\"", category: "", sequence: 4 },
-    { id: "pa-6", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf B/Bin 2", product: "ELEC_002 Monitor 27\"", category: "", sequence: 4 },
-    { id: "pa-7", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf C", product: "", category: "Office Supplies", sequence: 6 },
-    { id: "pa-8", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf D", product: "", category: "Packaging Materials", sequence: 7 },
-    { id: "pa-9", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf E/Pallet", product: "", category: "Raw Materials", sequence: 8 },
-    { id: "pa-10", location_in_id: "loc-stock", location_out: "WH/Stock/Hazardous", product: "", category: "Chemicals", sequence: 9 },
-    { id: "pa-11", location_in_id: "loc-stock", location_out: "WH/Stock/Cold Room", product: "", category: "Perishable", sequence: 10 },
+    // Modern style — m2o references to real sub-location nodes (drill-in shows them)
+    { id: "pa-1", location_in_id: "loc-stock", location_out_id: "loc-stock-bulk",    location_out: "WH/Stock/Bulk",    product: "FURN_7800 Office Desk",   category: "",            sequence: 1, storage_strategy: "manual_no_strategy" },
+    { id: "pa-2", location_in_id: "loc-stock", location_out_id: "loc-stock-bulk",    location_out: "WH/Stock/Bulk",    product: "FURN_7801 Standing Desk", category: "",            sequence: 2, storage_strategy: "manual_no_strategy" },
+    { id: "pa-3", location_in_id: "loc-stock", location_out_id: "loc-stock-bulk",    location_out: "WH/Stock/Bulk",    product: "FURN_8999 Ergonomic Chair", category: "",          sequence: 3, storage_strategy: "manual_no_strategy" },
+    { id: "pa-4", location_in_id: "loc-stock", location_out_id: "loc-stock-picking", location_out: "WH/Stock/Picking", product: "",                       category: "Electronics",  sequence: 5, storage_strategy: "least_packages",   storage_category_id: "cat-bin" },
+    { id: "pa-5", location_in_id: "loc-stock", location_out_id: "loc-stock-picking", location_out: "WH/Stock/Picking", product: "ELEC_001 Laptop 15\"",   category: "",            sequence: 4, storage_strategy: "least_packages",   storage_category_id: "cat-bin" },
+    { id: "pa-6", location_in_id: "loc-stock", location_out_id: "loc-stock-picking", location_out: "WH/Stock/Picking", product: "ELEC_002 Monitor 27\"",  category: "",            sequence: 4, storage_strategy: "least_packages",   storage_category_id: "cat-bin" },
+    { id: "pa-7", location_in_id: "loc-stock", location_out_id: "loc-stock-storage", location_out: "WH/Stock/Storage", product: "",                       category: "Office Supplies", sequence: 6, storage_strategy: "closest_location" },
+    { id: "pa-8", location_in_id: "loc-stock", location_out_id: "loc-stock-storage", location_out: "WH/Stock/Storage", product: "",                       category: "Packaging Materials", sequence: 7, storage_strategy: "closest_location" },
+    { id: "pa-9", location_in_id: "loc-stock", location_out_id: "loc-stock-bulk",    location_out: "WH/Stock/Bulk",    product: "",                       category: "Raw Materials", sequence: 8, storage_strategy: "manual_no_strategy", storage_category_id: "cat-pallet" },
+    // Legacy style — string-only (phantom; drill-in won't show these as nodes)
+    { id: "pa-10", location_in_id: "loc-stock", location_out: "WH/Stock/Hazardous",  product: "", category: "Chemicals",  sequence: 9 },
+    { id: "pa-11", location_in_id: "loc-stock", location_out_id: "loc-stock-cold",   location_out: "WH/Stock/Cold Room", product: "", category: "Perishable", sequence: 10, storage_category_id: "cat-cold" },
     { id: "pa-12", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf F/Oversize", product: "", category: "Furniture/Large", sequence: 11 },
     { id: "pa-13", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf G", product: "", category: "Spare Parts", sequence: 12 },
-    { id: "pa-14", location_in_id: "loc-stock", location_out: "WH/Stock/Shelf A", product: "", category: "All", sequence: 99 },
+    { id: "pa-14", location_in_id: "loc-stock", location_out_id: "loc-stock-storage", location_out: "WH/Stock/Storage", product: "", category: "All", sequence: 99, storage_strategy: "closest_location" },
     // WH/QC
     { id: "pa-15", location_in_id: "loc-qc", location_out: "WH/QC/Pending", product: "", category: "All", sequence: 10 },
     // WH/Pre-Production
     { id: "pa-16", location_in_id: "loc-preprod", location_out: "WH/Pre-Prod/Line 1", product: "", category: "Assemblies", sequence: 5 },
     { id: "pa-17", location_in_id: "loc-preprod", location_out: "WH/Pre-Prod/Line 2", product: "", category: "Components", sequence: 6 },
   ],
+  // Storage categories — registry referenced by location.storage_category_id
+  // and putaway-rule.storage_category_id. The `capacity_ids` o2m holds
+  // per-product overrides; when a product is in capacity_ids, its qty wins.
+  // Else `capacity_qty` is the fallback. Mirrors stock.storage.category in Odoo.
   storageCategories: [
-    { id: "cat-pallet", name: "Pallet",       allow_new_product: "same_product",   max_weight: 500, capacity_qty: 1   },
-    { id: "cat-bin",    name: "Bin",          allow_new_product: "mixed_products", max_weight: 50,  capacity_qty: 100 },
-    { id: "cat-cold",   name: "Cold Storage", allow_new_product: "mixed_products", max_weight: 0,   capacity_qty: 200 },
+    { id: "cat-pallet", name: "Pallet", allow_new_product: "same_product", max_weight: 500, capacity_qty: 1,
+      capacity_ids: [
+        { product: "FURN_7800 Office Desk",   qty: 1 },
+        { product: "FURN_7801 Standing Desk", qty: 1 },
+      ] },
+    { id: "cat-bin", name: "Bin", allow_new_product: "mixed_products", max_weight: 50, capacity_qty: 100,
+      capacity_ids: [
+        { product: "ELEC_001 Laptop 15\"",  qty: 30 },
+        { product: "ELEC_002 Monitor 27\"", qty: 8  },
+      ] },
+    { id: "cat-cold", name: "Cold Storage", allow_new_product: "mixed_products", max_weight: 0, capacity_qty: 200, capacity_ids: [] },
   ],
   companies: [
     { id: "comp-1", name: "Main Company" },
@@ -2301,12 +2338,23 @@ const CommandPalette = ({ commands, onClose }) => {
 // CRUD over data.storageCategories. Each row: name | allow_new_product |
 // max_weight | capacity_qty | × delete. + Add row at bottom.
 const StorageCategoryModal = ({ categories, onUpdate, onClose }) => {
-  const [items, setItems] = useState(() => categories.map(c => ({ ...c })));
+  const [items, setItems] = useState(() => categories.map(c => ({ ...c, capacity_ids: [...(c.capacity_ids || [])] })));
+  const [expanded, setExpanded] = useState(new Set());  // category ids whose per-product table is open
   const setField = (idx, key, value) => setItems(arr => arr.map((c, i) => i === idx ? { ...c, [key]: value } : c));
+  const setCapField = (idx, capIdx, key, value) => setItems(arr => arr.map((c, i) => i !== idx ? c : {
+    ...c, capacity_ids: c.capacity_ids.map((cap, j) => j === capIdx ? { ...cap, [key]: value } : cap),
+  }));
+  const addCapRow = (idx) => setItems(arr => arr.map((c, i) => i !== idx ? c : {
+    ...c, capacity_ids: [...(c.capacity_ids || []), { product: '', qty: 1 }],
+  }));
+  const delCapRow = (idx, capIdx) => setItems(arr => arr.map((c, i) => i !== idx ? c : {
+    ...c, capacity_ids: c.capacity_ids.filter((_, j) => j !== capIdx),
+  }));
+  const toggleExpand = (id) => setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const addRow = () => setItems(arr => [...arr, {
     id: `cat-${Math.random().toString(36).slice(2, 8)}`,
     name: 'New category', allow_new_product: 'mixed_products',
-    max_weight: 0, capacity_qty: 0,
+    max_weight: 0, capacity_qty: 0, capacity_ids: [],
   }]);
   const delRow = (idx) => setItems(arr => arr.filter((_, i) => i !== idx));
   const save = () => { onUpdate(items); onClose(); };
@@ -2330,7 +2378,8 @@ const StorageCategoryModal = ({ categories, onUpdate, onClose }) => {
             </thead>
             <tbody>
               {items.map((c, i) => (
-                <tr key={c.id} style={{ borderBottom: `1px solid ${T.border}55` }}>
+                <React.Fragment key={c.id}>
+                <tr style={{ borderBottom: `1px solid ${T.border}55` }}>
                   <td style={{ padding: "4px 8px" }}>
                     <input value={c.name} onChange={e => setField(i, 'name', e.target.value)}
                       style={{ width: "100%", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "inherit" }} />
@@ -2352,10 +2401,42 @@ const StorageCategoryModal = ({ categories, onUpdate, onClose }) => {
                       style={{ width: 80, background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: "3px 6px", borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" }} />
                   </td>
                   <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                    <button onClick={() => toggleExpand(c.id)}
+                      title={`${(c.capacity_ids || []).length} per-product capacity rule(s) — click to expand`}
+                      style={{ background: "transparent", border: "none", color: T.textDim, fontSize: 11, marginRight: 6, cursor: "pointer", fontFamily: "inherit" }}>
+                      {expanded.has(c.id) ? '▾' : '▸'} {(c.capacity_ids || []).length}
+                    </button>
                     <button onClick={() => delRow(i)} title="Delete category"
                       style={{ background: "transparent", border: "none", color: T.red, fontSize: 14, cursor: "pointer" }}>✕</button>
                   </td>
                 </tr>
+                {expanded.has(c.id) && (
+                  <tr style={{ borderBottom: `1px solid ${T.border}55`, background: T.surfaceHover }}>
+                    <td colSpan={5} style={{ padding: "8px 16px" }}>
+                      <div style={{ fontSize: 10, color: T.textDim, marginBottom: 4, fontWeight: 600 }}>
+                        Per-product capacity overrides — wins over `capacity_qty` when product matches.
+                      </div>
+                      {(c.capacity_ids || []).length === 0 && (
+                        <div style={{ fontSize: 10, color: T.textDim, fontStyle: "italic", marginBottom: 4 }}>(no per-product rules — using capacity_qty for all products)</div>
+                      )}
+                      {(c.capacity_ids || []).map((cap, j) => (
+                        <div key={j} style={{ display: "grid", gridTemplateColumns: "1fr 80px 24px", gap: 4, marginBottom: 3 }}>
+                          <input value={cap.product || ''} placeholder="Product (free-text or external id)"
+                            onChange={e => setCapField(i, j, 'product', e.target.value)}
+                            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, padding: "3px 6px", borderRadius: 3, fontFamily: "inherit" }} />
+                          <input type="number" value={cap.qty ?? 0}
+                            onChange={e => setCapField(i, j, 'qty', parseFloat(e.target.value) || 0)}
+                            style={{ background: T.surface, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, padding: "3px 6px", borderRadius: 3, fontFamily: "'IBM Plex Mono', monospace", textAlign: "right" }} />
+                          <button onClick={() => delCapRow(i, j)} title="Remove rule"
+                            style={{ background: "transparent", border: "none", color: T.red, fontSize: 11, cursor: "pointer" }}>✕</button>
+                        </div>
+                      ))}
+                      <button onClick={() => addCapRow(i)}
+                        style={{ marginTop: 4, padding: "3px 8px", background: T.accentSoft, color: T.accent, border: `1px solid ${T.accent}55`, borderRadius: 3, fontSize: 10, fontFamily: "inherit", cursor: "pointer" }}>+ rule</button>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -4971,9 +5052,28 @@ export default function App() {
                 if (routeInactive && !showInactive) return null;
                 const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
                 return route.rules.map(rule => {
-                  const sn = data.nodes.find(n => n.id === rule.src_location_id);
-                  const dn = data.nodes.find(n => n.id === rule.dest_location_id);
+                  let sn = data.nodes.find(n => n.id === rule.src_location_id);
+                  let dn = data.nodes.find(n => n.id === rule.dest_location_id);
                   if (!sn || !dn) return null;
+                  // Sub-location remap (option A from roadmap #50): on the main
+                  // canvas (no drillInto), if src or dst is a sub-location, walk
+                  // up its location_id chain to the top-level ancestor and use
+                  // that as the visible endpoint instead. The drill-in render
+                  // (separate code path) doesn't need this — sub-locations ARE
+                  // visible there.
+                  let subSrc = null, subDst = null;
+                  if (!drillInto) {
+                    const walkToTop = (n) => {
+                      let cur = n, depth = 0;
+                      while (cur?.data?.location_id && depth < 50) {
+                        cur = data.nodes.find(nn => nn.id === cur.data.location_id);
+                        depth++;
+                      }
+                      return cur || n;
+                    };
+                    if (sn.data?.location_id) { subSrc = sn; sn = walkToTop(sn); }
+                    if (dn.data?.location_id) { subDst = dn; dn = walkToTop(dn); }
+                  }
                   const { sp, dp, ss, ds } = bestPorts(sn, dn);
                   const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
                   const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
@@ -5023,6 +5123,21 @@ export default function App() {
                           </span>
                         </div>
                       </foreignObject>
+                      {/* Sub-location badge: when this rule's src and/or dst is a
+                          sub-location, show a small "[child → child]" hint below the
+                          label so the main canvas signals the nested target without
+                          forcing the user to drill in. */}
+                      {(subSrc || subDst) && (
+                        <foreignObject x={mid.x - 80} y={mid.y + 4} width={160} height={16}>
+                          <div style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+                            <span style={{ fontSize: 8 * Math.max(scale, 0.7), color: T.textDim, background: `${T.surfaceHover}dd`, padding: "1px 5px", borderRadius: 2, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "nowrap", border: `1px dashed ${T.border}` }}>
+                              {subSrc ? (subSrc.label || subSrc.id) : (sn.label || '–')}
+                              <span style={{ opacity: 0.6, margin: "0 4px" }}>›</span>
+                              {subDst ? (subDst.label || subDst.id) : (dn.label || '–')}
+                            </span>
+                          </div>
+                        </foreignObject>
+                      )}
                     </g>
                   );
                 });
