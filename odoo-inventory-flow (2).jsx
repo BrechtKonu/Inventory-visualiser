@@ -437,6 +437,7 @@ const Btn = ({ children, onClick, variant = "default", small, icon, disabled, ti
       fontWeight: icon ? 600 : 700, cursor: disabled ? "not-allowed" : "pointer", display: "inline-flex",
       alignItems: "center", gap: showChildren && icon ? 5 : 0, opacity: disabled ? 0.4 : 1,
       fontFamily: "'IBM Plex Sans', sans-serif", transition: "background 0.15s",
+      whiteSpace: "nowrap", flexShrink: 0,
       ...v[variant], ...style,
     }}>
       {icon && <SI d={ICONS[icon]} size={small ? 15 : 17} />}{showChildren && children}
@@ -4780,9 +4781,12 @@ export default function App() {
     <div style={{ width: "100%", height: "100vh", maxHeight: "100%", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
-      {/* TOOLBAR */}
-      <div style={{ height: 44, background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "0 10px" : "0 14px", flexShrink: 0, zIndex: 40, overflowX: "auto", overflowY: "hidden" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: compact ? 6 : 10 }}>
+      {/* TOOLBAR — minHeight (not fixed height) + flexWrap so it grows
+          to a second row when content doesn't fit, instead of clipping
+          children or scrolling internally. Items inside use nowrap on
+          their own text so a single item never wraps mid-word. */}
+      <div style={{ minHeight: 44, background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "4px 10px" : "4px 14px", flexShrink: 0, zIndex: 40, flexWrap: "wrap", rowGap: 4, columnGap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: compact ? 6 : 10, flexWrap: "wrap", rowGap: 4, minWidth: 0 }}>
           {/* Sidebar toggles — placed first so they stay visible even if the
               toolbar overflows on narrow screens. Both persisted in localStorage. */}
           <button onClick={() => setLeftSidebarVisible(v => !v)}
@@ -4799,12 +4803,14 @@ export default function App() {
               fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer", lineHeight: 1 }}>
             {rightSidebarVisible ? "│▶" : "◀│"}
           </button>
-          <div style={{ width: 22, height: 22, borderRadius: 4, background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>⌂</div>
-          {!compact && <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>Odoo Inventory Flow</span>}
-          <span title={compact ? `${data.nodes.length} nodes · ${data.operationTypes.length} ops · ${data.routes.length} routes · ${data.routes.reduce((a, r) => a + r.rules.length, 0)} rules` : undefined}
-                style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>
-            {data.nodes.length}n · {data.operationTypes.length}op · {data.routes.length}r · {data.routes.reduce((a, r) => a + r.rules.length, 0)}rl
-          </span>
+          <div style={{ width: 22, height: 22, borderRadius: 4, background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, flexShrink: 0 }}>⌂</div>
+          {!compact && <span style={{ fontSize: 12, fontWeight: 700, color: T.text, whiteSpace: "nowrap", flexShrink: 0 }}>Odoo Inventory Flow</span>}
+          {!compact && (
+            <span title={`${data.nodes.length} nodes · ${data.operationTypes.length} ops · ${data.routes.length} routes · ${data.routes.reduce((a, r) => a + r.rules.length, 0)} rules`}
+                  style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "nowrap", flexShrink: 0 }}>
+              {data.nodes.length}n · {data.operationTypes.length}op · {data.routes.length}r · {data.routes.reduce((a, r) => a + r.rules.length, 0)}rl
+            </span>
+          )}
           <button onClick={() => setUiMode(m => m === 'advanced' ? 'standard' : 'advanced')}
             title={isAdvanced ? "Advanced mode — extra controls visible. Click to switch to Standard." : "Standard mode — minimal controls. Click to switch to Advanced for perf/filter/viewports."}
             style={{ background: isAdvanced ? T.accentSoft : "transparent", border: `1px solid ${isAdvanced ? T.accent : T.border}`,
@@ -4916,7 +4922,7 @@ export default function App() {
             );
           })()}
         </div>
-        <div style={{ display: "flex", gap: compact ? 2 : 4 }}>
+        <div style={{ display: "flex", gap: compact ? 2 : 4, flexWrap: "wrap", rowGap: 4, minWidth: 0 }}>
           <Btn small compact={compact} icon="download" onClick={handleFetchFromOdoo} disabled={!!fetchStatus?.loading} variant={fetchStatus?.error ? "danger" : "ghost"} title="Fetch live data from Odoo (replaces current diagram)">
             {fetchStatus?.loading ? (fetchStatus.progress || "Fetching…") : "Fetch from Odoo"}
           </Btn>

@@ -416,8 +416,10 @@ Help modal text updated.
 
 For narrow / split-screen viewports where the toolbar got cut off and the right sidebar overlapped the canvas:
 
-- Two toggles at the very-left of the toolbar (so they stay visible if the toolbar overflows): hide/show left sidebar and hide/show right sidebar (PropPanel). Both persisted in localStorage.
-- Toolbar gets `overflowX: auto` so it can be horizontally scrolled when items don't fit, instead of clipping at the right edge.
+- Two toggles at the very-left of the toolbar: hide/show left sidebar and hide/show right sidebar (PropPanel). Both persisted in localStorage.
+- Toolbar uses **`minHeight: 44` + `flexWrap: wrap`** (not fixed `height: 44 + overflowX: auto`). When content doesn't fit on one row, the toolbar grows to a second row instead of clipping or scrolling internally. Both flex clusters (left + right) carry `flexWrap: wrap` and `minWidth: 0` so they can shrink-and-wrap independently.
+- `Btn` and toolbar text spans get `whiteSpace: nowrap` + `flexShrink: 0` so a single button or label never wraps mid-word — only the row break wraps. Without this, button text was wrapping to two lines under pressure, pushing children to ~56px and clipping inside the 44px toolbar.
+- Stats counter (`16n · 14op · 8r · 15rl`) hides when compact (`!compact && <span>`).
 - Left sidebar uses `display: none` when hidden; canvas `marginLeft` tracks the toggle so the canvas reclaims the full width.
 - PropPanel render is gated on `rightSidebarVisible` so the user can dismiss it without losing selection. Width caps at `100vw` so it can't exceed the viewport on tiny screens.
 - Defensive overflow rules in the build template: `html, body, #root` get `overflow: hidden` + `width: 100%` so nothing spills outside the viewport. App root uses `width: 100%; height: 100vh; maxHeight: 100%`.
