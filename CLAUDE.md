@@ -96,7 +96,7 @@ Entities created by the warehouse-preset wizard (`src/warehouse-presets.js`) car
 __autoGen: { warehouseId, source }
 ```
 
-`source ∈ { 'identity', 'reception_steps', 'delivery_steps', 'manufacture', 'buy', 'resupply:<wh_id>' }`. `identity` = the warehouse + its Stock + Vendors/Customers. The flag-driven sources tag everything generated from a specific configuration toggle. Round-trips through the JSON export. Used by future Plan B (shrink-detection on field edits) and Plan C ("Create in Odoo" reconciliation).
+`source ∈ { 'identity', 'reception_steps', 'delivery_steps', 'manufacture', 'buy', 'resupply:<wh_id>' }`. `identity` = the warehouse + its Stock + Vendors/Customers. The flag-driven sources tag everything generated from a specific configuration toggle. Round-trips through the JSON export. Used by Plan B (shrink-detection on field edits).
 
 Resupply tagging is two-sided: target-side entities (Transit, IN op-type, route) tag `warehouseId=<target>, source='resupply:<source>'`; the source-side OUT op-type tags `warehouseId=<source>, source='resupply:<target>'`. This lets shrink-detection find both sides via complementary queries.
 
@@ -152,12 +152,12 @@ Remaining roadmap (deferred):
 
 ### Overnight 2026-05-08 → 2026-05-09 wave (status as of morning)
 
-Eight features shipped overnight on `main`. The pure-module test suite is at **25 passing** (`npm run test:presets`). Both bundles rebuild cleanly. Plan C is parked at worktree branch `worktree-agent-a109b0e7415c5da2d` for review.
+Eight features shipped overnight on `main`. The pure-module test suite is at **25 passing** (`npm run test:presets`). Both bundles rebuild cleanly.
 
 - ✅ **Auto-layout: route-grouped tier layout with center-axis shared nodes** — each route gets a numeric `laneRank` from its action signature; nodes shared by multiple routes auto-pin to the center axis. Constants: `Y_CENTER=400`, `LANE_GAP=110`, drift only fires for genuinely linear chains.
 - ✅ **Warehouse-creation presets — Plan A (creation flow)** — wizard for `Add → Warehouse` with reception/delivery/manufacture/buy/resupply flags. Pure-function generators in `src/warehouse-presets.js`. Provenance via `__autoGen = { warehouseId, source }` round-trips through JSON. Smart code/name defaults (`WH<n>`, `Main/Secondary/Tertiary Warehouse`). Resupply m2m chip picker shown when canvas has ≥1 existing warehouse. Live preview panel.
 - ✅ **Warehouse-creation presets — Plan B (live regen + shrink dialog)** — editing `reception_steps`/`delivery_steps`/`manufacture_to_resupply`/`manufacture_steps`/`buy_to_resupply`/`resupply_wh_ids` on an existing warehouse intercepts via `presetDiff`. Pure grow applies directly with undo. Shrink opens `ShrinkDialog` with orphan list + external-rule references. Three resolutions: Cancel / Delete orphans / Keep but deactivate (`active=false` + `__autoGen.deactivated=true`). "Show inactive" sidebar toggle dims deactivated entities to opacity 0.4.
-- ⏸ **Warehouse-creation presets — Plan C (Create in Odoo)** — built but parked at worktree `worktree-agent-a109b0e7415c5da2d`. UI scaffold complete (button, confirm dialog with mandatory checkbox); `createWarehouseInOdoo` calls `stock.warehouse.create` via existing proxy and re-imports with `__autoGen` source-tag inference from labels. Untested against live Odoo — that's why it's parked, awaiting a staging-instance test before merge.
+- ❌ **Warehouse-creation presets — Plan C (Create in Odoo)** — **dropped from scope.** A scaffold existed at worktree `worktree-agent-a109b0e7415c5da2d` (kept as a safety net, no longer in active development). Reasoning: the workflow is already covered two ways — (a) build with the in-app wizard then push via the existing Odoo write path, or (b) create the warehouse in Odoo's own UI and pull it back via Fetch. A dedicated "Create in Odoo" button adds a third way that needs its own reconciliation logic for marginal benefit.
 - ✅ **Push-rule domain helper** — `domain` field on rules in PropPanel. Textarea + 6 preset insert buttons (`has QC route`, `stock in location`, `has product tag`, `product category`, `on sale`, `is purchasable`) plus a "Wrap in [...]" button.
 - ✅ **Putaway storage strategies** — `storage_strategy` (manual_no_strategy / closest_location / least_packages) and `storage_category_id` surfaced per putaway rule. `storage_category_id` also added to location field schema. Generated API code includes the new fields in fetch templates.
 - ✅ **Templates append mode** — every template card now has Replace + "+ Add" buttons. Add merges with id-remapping (`tXXXX-` prefix) and dedupes shared semantic locations (Vendors/Customers map to existing canvas nodes). One undo step.
@@ -311,7 +311,6 @@ When picking next, the order Brecht likely wants:
 4. **Sequence numbers brainstorm** (small Q&A).
 5. **Excel/CSV Odoo import export** (medium-large) — requires choosing the external-id strategy.
 6. **Miro brainstorm Q&A** (small Q&A), then implementation (medium-large).
-7. **Plan C verification** (depends on having staging Odoo access).
 
 ### Roadmap wave 3 (captured 2026-05-09 morning, post-Q&A)
 
@@ -546,9 +545,9 @@ A scan of the current state surfaces these maintenance items:
 
 3. **`hashColor`, `dashFor`, `nodeVisual`, `bestPorts` and several helpers** appear in TS-noisy diagnostics as "declared but never read" but ARE used (or were used). A cleanup pass should grep each and either rewire or delete.
 
-4. **Plan C worktree** (Create-in-Odoo) is parked at `worktree-agent-a109b0e7415c5da2d` — verify against staging Odoo before merging or delete.
+4. **Plan C worktree** (Create-in-Odoo) is dropped from scope; the branch `worktree-agent-a109b0e7415c5da2d` is kept as an unmounted safety net but not on the roadmap. Delete the branch outright once you're sure none of its scaffolding is wanted.
 
-5. **No automated tests beyond `test:presets`** (25 assertions, all pure-module). Consider:
+5. **Test suite** (`npm run test:presets`, 46 assertions across `warehouse-presets`, `location-tree`, `putaway-simulator`, `vsdx-exporter` — all pure-module). Consider:
    - Snapshot tests for `markdown-exporter.js` (low effort, high value).
    - Unit tests for `presetDiff` edge cases (already partial — extend).
    - Playwright/Puppeteer E2E for wizard create/edit flow (medium effort, high value but heavyweight).
