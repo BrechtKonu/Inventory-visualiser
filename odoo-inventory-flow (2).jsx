@@ -5747,12 +5747,18 @@ export default function App() {
                   if (!sn || !dn) return null;
                   if (clusterMode) return null; // cluster mode hides individual edges
                   if (!isEdgeInViewport(sn, dn)) return null;
-                  // Warehouse drill-in: only show rules where both endpoints
-                  // belong to this warehouse OR are shared (supplier/customer/inventory).
-                  if (drillInto && drillIntoType === 'warehouse') {
+                  // Compute visibility per endpoint instead of failing the
+                  // whole edge. When exactly one endpoint is hidden by a
+                  // company filter or drill-in, we render a "stub edge" that
+                  // fades out toward the hidden side — like off-map roads
+                  // on cartographic maps.
+                  const isWhDrill = drillInto && drillIntoType === 'warehouse';
+                  const isLocDrill = drillInto && drillIntoType === 'location';
+                  let belongsToWh = null;
+                  if (isWhDrill) {
                     const wh = data.nodes.find(n => n.id === drillInto);
                     const code = wh?.data?.code || '';
-                    const belongsToWh = (n) => {
+                    belongsToWh = (n) => {
                       if (!n || n.type !== 'location') return false;
                       const u = n.data?.usage;
                       if (u === 'supplier' || u === 'customer' || u === 'inventory') return true;
@@ -5760,13 +5766,10 @@ export default function App() {
                       const cn = n.data?.complete_name || n.label || '';
                       return code && (cn === code || cn.startsWith(code + '/'));
                     };
-                    if (!belongsToWh(sn) || !belongsToWh(dn)) return null;
                   }
-                  // Location drill-in: only show rules where both endpoints
-                  // are the pivot OR descendants of the pivot. Skips rules
-                  // pointing OUT of the subtree.
-                  if (drillInto && drillIntoType === 'location') {
-                    const isPivotOrDesc = (n) => {
+                  let isPivotOrDesc = null;
+                  if (isLocDrill) {
+                    isPivotOrDesc = (n) => {
                       if (!n || n.type !== 'location') return false;
                       if (n.id === drillInto) return true;
                       let cur = n, depth = 0;
@@ -5779,8 +5782,18 @@ export default function App() {
                       }
                       return false;
                     };
-                    if (!isPivotOrDesc(sn) || !isPivotOrDesc(dn)) return null;
                   }
+                  const isVisible = (n) => {
+                    if (!passesCompanyFilter(n)) return false;
+                    if (isWhDrill && !belongsToWh(n)) return false;
+                    if (isLocDrill && !isPivotOrDesc(n)) return false;
+                    return true;
+                  };
+                  const srcVis = isVisible(sn);
+                  const dstVis = isVisible(dn);
+                  if (!srcVis && !dstVis) return null;
+                  const srcHidden = !srcVis;
+                  const dstHidden = !dstVis;
                   // Sub-location remap (option A from roadmap #50): on the main
                   // canvas (no drillInto), if src or dst is a sub-location AND
                   // it's NOT in the visibleSubLocs set, walk up its location_id
@@ -5804,9 +5817,37 @@ export default function App() {
                     if (dn.data?.location_id && !visibleSubLocs.has(dn.id)) { subDst = dn; dn = walkToTop(dn); }
                   }
                   const { sp, dp, ss, ds } = bestPorts(sn, dn);
-                  const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
-                  const p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
-                  const curveOff = edgeOffsets.get(rule.id) ?? 0;
+                  let p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
+                  let p2 = { x: dp.x * scale + offset.x, y: dp.y * scale + offset.y };
+                  // Stub-edge override: when exactly one endpoint is hidden,
+                  // anchor the line at the visible endpoint and replace the
+                  // hidden endpoint with a "stub point" STUB_LEN_PX past the
+                  // visible side, in the direction of where the hidden node
+                  // really sits. Suppresses the curve offset, the arrow head,
+                  // and dims the stroke so the line reads as "off-canvas
+                  // continuation" rather than a real connection.
+                  const isStub = srcHidden !== dstHidden;
+                  const STUB_LEN_PX = 90;
+                  let stubLabel = null, stubAtP1 = false;
+                  if (isStub) {
+                    const hiddenNode = srcHidden ? sn : dn;
+                    const visiblePt = srcHidden ? p2 : p1;
+                    const hiddenPt = srcHidden ? p1 : p2;
+                    const dx = hiddenPt.x - visiblePt.x;
+                    const dy = hiddenPt.y - visiblePt.y;
+                    const len = Math.max(1, Math.hypot(dx, dy));
+                    const stubPt = { x: visiblePt.x + (dx / len) * STUB_LEN_PX, y: visiblePt.y + (dy / len) * STUB_LEN_PX };
+                    if (srcHidden) p1 = stubPt; else p2 = stubPt;
+                    stubAtP1 = srcHidden;
+                    // Label text — try to surface "to <Company> · <Node>" when
+                    // the company filter is the cause; fall back to just the
+                    // node label for warehouse/location drill-in cases.
+                    const cid = hiddenNode.data?.company_id;
+                    const company = cid && (data.companies || []).find(c => c.id === cid);
+                    const ctxLabel = company?.name || (isWhDrill ? 'other warehouse' : isLocDrill ? 'outside this scope' : 'other');
+                    stubLabel = `to ${ctxLabel} · ${hiddenNode.label || hiddenNode.id}`;
+                  }
+                  const curveOff = isStub ? 0 : (edgeOffsets.get(rule.id) ?? 0);
                   const d = bPath(p1, p2, ss, ds, curveOff);
                   const mid = bezierPoint(p1, p2, ss, ds, curveOff, 0.5);
                   const dotPos = bezierPoint(p1, p2, ss, ds, curveOff, 0.86);
@@ -5827,31 +5868,58 @@ export default function App() {
                        onMouseEnter={() => setHoveredRuleId(rule.id)}
                        onMouseLeave={() => setHoveredRuleId(prev => prev === rule.id ? null : prev)}
                        style={{ cursor: "pointer" }}>
-                      <title>{`${rule.label}\n${tip}`}</title>
+                      <title>{`${rule.label}\n${tip}${isStub ? `\n${stubLabel}` : ''}`}</title>
                       {/* Invisible wide hit-area path so the edge is easy to click */}
                       <path d={d} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
-                      {/* Ghost halo for umbrella rules — wider, semi-transparent below */}
-                      {isUmbrella && (
+                      {/* Ghost halo for umbrella rules — wider, semi-transparent below.
+                          Suppressed for stubs so the off-canvas continuation
+                          stays subtle. */}
+                      {isUmbrella && !isStub && (
                         <path d={d} fill="none" stroke={rc.stroke} strokeWidth={isSel ? 14 : 11} strokeOpacity={isSel ? 0.18 : 0.10} strokeLinecap="round" pointerEvents="none" />
                       )}
                       <path d={d} fill="none" stroke={rc.stroke} strokeWidth={isSel ? 6 : 3} strokeOpacity={isSel ? 0.2 : 0.05} pointerEvents="none" />
-                      <path d={d} fill="none" stroke={rc.stroke} strokeWidth={isSel ? 2.5 : 1.8} strokeOpacity={isSel ? 1 : 0.5} strokeDasharray={dashArr} markerEnd={`url(#arr-r-${rc.stroke.replace('#', '')})`} />
-                      {/* MTO/MTS marker — filled = MTO, hollow = MTS */}
-                      <circle cx={dotPos.x} cy={dotPos.y} r={dotR} fill={isMto ? rc.stroke : T.bg} stroke={rc.stroke} strokeWidth={1.2} strokeOpacity={0.9} />
-                      {/* Action glyph (buy/manufacture) at midpoint */}
-                      {meta.glyph && (
+                      {/* Main stroke. For stubs: lower opacity, dotted regardless
+                          of action style, no arrow at the faded end. */}
+                      <path d={d} fill="none"
+                            stroke={rc.stroke}
+                            strokeWidth={isSel ? 2.5 : 1.8}
+                            strokeOpacity={isStub ? (isSel ? 0.55 : 0.4) : (isSel ? 1 : 0.5)}
+                            strokeDasharray={isStub ? `${4 * scale} ${4 * scale}` : dashArr}
+                            markerEnd={isStub ? undefined : `url(#arr-r-${rc.stroke.replace('#', '')})`} />
+                      {/* MTO/MTS marker, action glyph, and centred label only on
+                          full edges — stubs use the off-end label instead. */}
+                      {!isStub && (
+                        <circle cx={dotPos.x} cy={dotPos.y} r={dotR} fill={isMto ? rc.stroke : T.bg} stroke={rc.stroke} strokeWidth={1.2} strokeOpacity={0.9} />
+                      )}
+                      {!isStub && meta.glyph && (
                         <g transform={`translate(${mid.x},${mid.y - 14})`}>
                           <circle r={7 * Math.max(scale, 0.7)} fill={T.bg} stroke={rc.stroke} strokeWidth={1.2} />
                           <text x={0} y={0} fontSize={9 * Math.max(scale, 0.7)} fontWeight={700} fill={rc.stroke} textAnchor="middle" dominantBaseline="central" fontFamily="'IBM Plex Mono', monospace">{meta.glyph}</text>
                         </g>
                       )}
-                      <foreignObject x={mid.x - 70} y={mid.y - 18} width={140} height={20}>
-                        <div style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-                          <span style={{ fontSize: 8 * Math.max(scale, 0.7), fontWeight: 600, color: rc.stroke, background: `${T.bg}dd`, padding: "1px 5px", borderRadius: 2, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "nowrap" }}>
-                            {isUmbrella && <span style={{ opacity: 0.7, marginRight: 3 }}>↳</span>}{rule.label}
-                          </span>
-                        </div>
-                      </foreignObject>
+                      {!isStub && (
+                        <foreignObject x={mid.x - 70} y={mid.y - 18} width={140} height={20}>
+                          <div style={{ display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+                            <span style={{ fontSize: 8 * Math.max(scale, 0.7), fontWeight: 600, color: rc.stroke, background: `${T.bg}dd`, padding: "1px 5px", borderRadius: 2, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "nowrap" }}>
+                              {isUmbrella && <span style={{ opacity: 0.7, marginRight: 3 }}>↳</span>}{rule.label}
+                            </span>
+                          </div>
+                        </foreignObject>
+                      )}
+                      {/* Stub-edge label — sits at the faded end with "to <Context> · <Hidden>" text.
+                          A soft circle marks the off-canvas terminus. */}
+                      {isStub && (
+                        <>
+                          <circle cx={stubAtP1 ? p1.x : p2.x} cy={stubAtP1 ? p1.y : p2.y} r={3.5} fill={rc.stroke} fillOpacity={0.35} stroke={rc.stroke} strokeOpacity={0.6} strokeWidth={0.8} pointerEvents="none" />
+                          <foreignObject x={(stubAtP1 ? p1.x : p2.x) - 130} y={(stubAtP1 ? p1.y : p2.y) + 4} width={260} height={18} style={{ overflow: "visible", pointerEvents: "none" }}>
+                            <div style={{ display: "flex", justifyContent: "center" }}>
+                              <span style={{ fontSize: 8 * Math.max(scale, 0.7), fontWeight: 600, color: rc.stroke, background: `${T.bg}dd`, padding: "1px 5px", borderRadius: 2, fontFamily: "'IBM Plex Mono', monospace", whiteSpace: "nowrap", opacity: 0.85 }}>
+                                ↘ {stubLabel}
+                              </span>
+                            </div>
+                          </foreignObject>
+                        </>
+                      )}
                       {/* Sub-location badge: when this rule's src and/or dst is a
                           sub-location, show a small "[child → child]" hint below the
                           label so the main canvas signals the nested target without

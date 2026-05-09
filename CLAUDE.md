@@ -333,19 +333,31 @@ Shipped in `30302de` using approach **A** (parent-render + sub-loc badge on main
 
 Shipped in `30302de`. Putaway simulator + StorageCategoryModal both consume the o2m; `data.storageCategories[i].capacity_ids` round-trips through JSON export.
 
-#### 🟦 Cross-company stub edges (faded "to company X" indicators)
+#### ✅ Cross-company stub edges (faded "to … · …" indicators)
 
-When a node or warehouse is hidden by the company filter, rules that
-cross the boundary currently disappear from the canvas — the edge
-silently vanishes along with its endpoint. **Proposed**: render the
-boundary-crossing rule as a faded stub edge that fades out toward the
-hidden side, like off-map roads on cartographic maps. The stub would
-end ~80px past the visible edge with the label "to <Company X> · <hidden node label>"
-appended along the fade. Tooltip on hover names the company + hidden
-endpoint and hints "Switch to <Company X> to see the rest". Same idea
-applies to drill-in scope (`drillIntoType === 'warehouse'`) where a
-rule's other endpoint is in a different warehouse — fade rather than
-clip. Effort: medium; touches the rule-edge render path.
+When a node or warehouse is hidden by the company filter or by a
+warehouse / location drill-in, rules that cross the boundary used to
+silently disappear. They now render as a **stub edge**:
+
+- The visible endpoint stays in place; the hidden endpoint is replaced
+  by a "stub point" 90px past the visible side, in the direction of the
+  real hidden node. Curve offset is suppressed so the stub goes straight.
+- Stroke is dotted (`4 4 × scale`) at lower opacity (~0.4), with no
+  arrow at the faded end so it reads as "off-canvas continuation"
+  rather than a real connection.
+- A small soft circle marks the stub terminus; below it sits a label
+  `↘ to <Context> · <Hidden node>` where `<Context>` is the hidden
+  node's company name (when company filter is the cause) or the literal
+  `other warehouse` / `outside this scope` for drill-in cases.
+- Visibility per endpoint computed by a single `isVisible(node)` helper
+  combining `passesCompanyFilter`, `belongsToWh` (in warehouse drill-in),
+  and `isPivotOrDesc` (in location drill-in). Both hidden → still
+  returns null (no edge). Both visible → normal render. Exactly one →
+  stub branch.
+- Sub-loc remap still runs on hidden endpoints; the stub direction
+  follows the remapped ancestor's position, which keeps the line
+  pointing "off in the right general direction" without trying to be
+  precise about which sub-loc is hidden.
 
 #### 🟦 Per-product `capacity_ids` fetch from Odoo (later phase)
 
