@@ -420,8 +420,8 @@ For narrow / split-screen viewports where the toolbar got cut off and the right 
 - Toolbar gets `overflowX: auto` so it can be horizontally scrolled when items don't fit, instead of clipping at the right edge.
 - Left sidebar uses `display: none` when hidden; canvas `marginLeft` tracks the toggle so the canvas reclaims the full width.
 - PropPanel render is gated on `rightSidebarVisible` so the user can dismiss it without losing selection. Width caps at `100vw` so it can't exceed the viewport on tiny screens.
-- Defensive overflow rules in the build template: `html, body, #root` get `overflow: hidden` + `width: 100%` so nothing spills outside the viewport. App root uses `width: 100vw; maxWidth: 100%; maxHeight: 100%` for the same belt-and-braces guarantee.
-- Auto-compact: `window.innerWidth < 1100` flips the toolbar to compact mode; `< 900` also auto-hides both sidebars on first load (session-scoped guard so user can reopen them and the auto-hide doesn't fire again).
+- Defensive overflow rules in the build template: `html, body, #root` get `overflow: hidden` + `width: 100%` so nothing spills outside the viewport. App root uses `width: 100%; height: 100vh; maxHeight: 100%`.
+- **NB**: an earlier attempt set the App root to `width: 100vw` and added an auto-compact / auto-hide-sidebars resize listener — both were reverted. `100vw` includes the vertical-scrollbar gutter on Windows browsers (~17px), and the auto-compact made icons appear "bigger" because labels disappeared. Manual control via the explicit toggles + the existing `⇲ compact` button is enough.
 
 #### ✅ Sub-loc → parent visual connector (current commit)
 

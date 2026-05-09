@@ -2766,26 +2766,6 @@ export default function App() {
   });
   useEffect(() => { try { localStorage.setItem('leftSidebarVisible', leftSidebarVisible ? '1' : '0'); } catch (_) {} }, [leftSidebarVisible]);
   useEffect(() => { try { localStorage.setItem('rightSidebarVisible', rightSidebarVisible ? '1' : '0'); } catch (_) {} }, [rightSidebarVisible]);
-  // Auto-compact toolbar + auto-hide sidebars when the viewport is narrow.
-  // Tracks window width via a resize listener; on narrow screens the user can
-  // still toggle the sidebars back on, but the default behaviour is "fit the
-  // visible chrome inside the window so nothing spills out".
-  useEffect(() => {
-    const apply = () => {
-      const w = window.innerWidth || 1280;
-      if (w < 1100) setCompact(true);
-      // Only auto-hide on first encounter at narrow width; respect user
-      // toggles afterward by checking session-level guard.
-      if (w < 900 && !sessionStorage.getItem('autoHideApplied')) {
-        setLeftSidebarVisible(false);
-        setRightSidebarVisible(false);
-        try { sessionStorage.setItem('autoHideApplied', '1'); } catch (_) {}
-      }
-    };
-    apply();
-    window.addEventListener('resize', apply);
-    return () => window.removeEventListener('resize', apply);
-  }, []);
   syncTheme(isDark); // keep T & nodeStyles in sync before every render
   const [data, setData] = useState(initData);
   const [scale, setScale] = useState(0.72);
@@ -4797,7 +4777,7 @@ export default function App() {
   }, [sel, data.routes]);
 
   return (
-    <div style={{ width: "100vw", maxWidth: "100%", height: "100vh", maxHeight: "100%", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ width: "100%", height: "100vh", maxHeight: "100%", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
       {/* TOOLBAR */}
