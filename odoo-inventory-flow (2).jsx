@@ -561,6 +561,10 @@ const initData = () => ({
     { id: "op-xd-out", label: "XD Ship", code: "outgoing", sequence_code: "XDS", src_location_id: "loc-crossdock", dest_location_id: "loc-customers", data: { name: "CrossDock Ship", code: "outgoing", sequence_code: "XDS", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
     // Internal replenishment (Storage Stock → Picking Stock) — sub-location-level transfer
     { id: "op-replenish", label: "Internal Replenishment", code: "internal", sequence_code: "REP", src_location_id: "loc-stock-storage", dest_location_id: "loc-stock-picking", data: { name: "Storage → Picking replenishment", code: "internal", sequence_code: "REP", create_backorder: "never", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
+    // Cold-chain put-away (QC → Cold Room) — push, sub-location dst
+    { id: "op-store-cold", label: "Cold Storage", code: "internal", sequence_code: "CLD", src_location_id: "loc-qc", dest_location_id: "loc-stock-cold", data: { name: "QC → Cold Room (perishables)", code: "internal", sequence_code: "CLD", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
+    // Fast-pick path (Picking Stock → Packing) — pull, sub-location src
+    { id: "op-fastpick", label: "Fast Pick", code: "internal", sequence_code: "FPK", src_location_id: "loc-stock-picking", dest_location_id: "loc-packing", data: { name: "Fast pick (light web orders)", code: "internal", sequence_code: "FPK", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
   ],
   routes: [
     // ── Receive in 3 steps (Input → QC → Stock)
@@ -611,6 +615,31 @@ const initData = () => ({
         { id: "rl-replenish1", label: "Storage → Picking", action: "pull", procure_method: "make_to_stock", src_location_id: "loc-stock-storage", dest_location_id: "loc-stock-picking", picking_type_id: "op-replenish", auto: "manual",
           data: { name: "Replenish picking zone", action: "pull", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0,
                   domain: "[('product_id.qty_available', '<', 10)]" }},
+      ]},
+    // ── Cold-Chain Storage (push rule with domain — perishables route past QC into Cold Room)
+    // Demonstrates: action=push, domain filter on the rule, sub-location as destination.
+    // Domain follows Odoo 19 stock_move.py: filtered_domain runs against stock.move,
+    // so 'product_id.X' is the right prefix (no 'move_id.' wrapper). The
+    // use_expiration_date field exists on product.template when the Expiry
+    // module is installed.
+    { id: "route-cold-chain", label: "Cold Chain (perishables → Cold)", colorIdx: 6,
+      data: { name: "WH: Cold-chain storage", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: false, sale_selectable: false },
+      rules: [
+        { id: "rl-cold1", label: "QC → Cold Room", action: "push", procure_method: "make_to_stock", src_location_id: "loc-qc", dest_location_id: "loc-stock-cold", picking_type_id: "op-store-cold", auto: "transparent",
+          data: { name: "Push perishables to Cold Room", action: "push", procure_method: "make_to_stock", auto: "transparent", propagate_cancel: false, delay: 0,
+                  domain: "[('product_id.use_expiration_date', '=', True)]" }},
+      ]},
+    // ── Fast Pick (sub-location as rule SRC — light web orders skip the bulk-pick step)
+    // Demonstrates: pull rule sourcing from a sub-location (Picking Stock) up to a
+    // top-level location (Packing), with a weight-based domain. On the main
+    // canvas the edge renders against WH/Stock with a sub-loc badge; drill-into
+    // WH/Stock to see the actual sub-edge.
+    { id: "route-fastpick", label: "Fast Pick (light web orders)", colorIdx: 7,
+      data: { name: "WH: Fast pick", active: true, product_selectable: false, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: true },
+      rules: [
+        { id: "rl-fp1", label: "Picking Stock → Packing", action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock-picking", dest_location_id: "loc-packing", picking_type_id: "op-fastpick", auto: "manual",
+          data: { name: "Fast pick light items", action: "pull", procure_method: "make_to_order", auto: "manual", propagate_cancel: true, delay: 0,
+                  domain: "[('product_id.weight', '<', 5)]" }},
       ]},
   ],
   // ── Putaway rules (separate from canvas nodes) ──
