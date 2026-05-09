@@ -544,6 +544,18 @@ const initData = () => ({
     L("loc-production", "Virtual/Production", 1160, 320, "production"),
     // ── Crossdock
     L("loc-crossdock", "WH/CrossDock", 580, 380, "internal", { barcode: "WH-XDOCK" }),
+    // ── Inventory adjustments (loss + scrap) — virtual locations for stock corrections.
+    // Inventory Loss: usage='inventory' — the standard target for write-offs / surplus / count adjustments.
+    // Scrap: usage='inventory' with scrap_location=true — receives damaged goods written off.
+    L("loc-inv-loss", "Virtual/Inventory adjustment", 1160, 600, "inventory", { barcode: "WH-LOSS" }),
+    L("loc-scrap",    "Virtual/Scrap",                1160, 680, "inventory", { barcode: "WH-SCRAP", scrap_location: true }),
+    // ── Second warehouse (interwarehouse only — no vendor/customer flows).
+    // Resupplied from wh1 via Transit; sends back to wh1 via Transit. Demonstrates
+    // the two-sided resupply pattern that warehouse-presets emits.
+    { id: "wh2", type: "warehouse", label: "Secondary Warehouse", x: 1500, y: 10, data: { code: "WH2", name: "Secondary Warehouse", reception_steps: "one_step", delivery_steps: "ship_only", buy_to_resupply: false, manufacture_to_resupply: false } },
+    L("loc-wh2-stock", "WH2/Stock", 1620, 320, "internal", { barcode: "WH2-STOCK" }),
+    // Transit between the two warehouses — usage='transit', shared.
+    L("loc-transit-12", "Transit/WH ↔ WH2", 1280, 320, "transit", { barcode: "TRANSIT-WH-WH2" }),
   ],
   operationTypes: [
     // Inbound
@@ -567,6 +579,28 @@ const initData = () => ({
     { id: "op-store-cold", label: "Cold Storage", code: "internal", sequence_code: "CLD", src_location_id: "loc-qc", dest_location_id: "loc-stock-cold", data: { name: "QC → Cold Room (perishables)", code: "internal", sequence_code: "CLD", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
     // Fast-pick path (Picking Stock → Packing) — pull, sub-location src
     { id: "op-fastpick", label: "Fast Pick", code: "internal", sequence_code: "FPK", src_location_id: "loc-stock-picking", dest_location_id: "loc-packing", data: { name: "Fast pick (light web orders)", code: "internal", sequence_code: "FPK", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true }},
+    // Scrap (Stock → Virtual/Scrap) — internal, write-off
+    { id: "op-scrap", label: "Scrap", code: "internal", sequence_code: "SCRAP", src_location_id: "loc-stock", dest_location_id: "loc-scrap", data: { name: "Scrap goods", code: "internal", sequence_code: "SCRAP", create_backorder: "never", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: false } },
+    // Inter-warehouse OUT (WH1/Stock → Transit) and IN (Transit → WH2/Stock).
+    // Two-sided pattern that warehouse-presets uses for resupply: source warehouse
+    // sends an OUT, target warehouse picks it up via IN. No vendors / customers.
+    { id: "op-iw-out", label: "WH → WH2 (out)", code: "internal",
+      sequence_code: "IWO", src_location_id: "loc-stock", dest_location_id: "loc-transit-12",
+      data: { name: "Inter-warehouse delivery (WH → WH2)", code: "internal", sequence_code: "IWO", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true },
+      __autoGen: { warehouseId: "wh1", source: "resupply:wh2" } },
+    { id: "op-iw-in",  label: "WH ← WH (in)",   code: "incoming",
+      sequence_code: "IWI", src_location_id: "loc-transit-12", dest_location_id: "loc-wh2-stock",
+      data: { name: "Inter-warehouse receipt (WH2 ← WH)", code: "incoming", sequence_code: "IWI", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true },
+      __autoGen: { warehouseId: "wh2", source: "resupply:wh1" } },
+    // Reverse flow (WH2 → WH) — symmetric, reuses the same Transit location.
+    { id: "op-iw-out-2", label: "WH2 → WH (out)", code: "internal",
+      sequence_code: "IWO2", src_location_id: "loc-wh2-stock", dest_location_id: "loc-transit-12",
+      data: { name: "Inter-warehouse delivery (WH2 → WH)", code: "internal", sequence_code: "IWO2", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true },
+      __autoGen: { warehouseId: "wh2", source: "resupply:wh1" } },
+    { id: "op-iw-in-2",  label: "WH ← WH2 (in)",  code: "incoming",
+      sequence_code: "IWI2", src_location_id: "loc-transit-12", dest_location_id: "loc-stock",
+      data: { name: "Inter-warehouse receipt (WH ← WH2)", code: "incoming", sequence_code: "IWI2", create_backorder: "ask", reservation_method: "at_confirm", use_create_lots: false, use_existing_lots: true, show_reserved: true },
+      __autoGen: { warehouseId: "wh1", source: "resupply:wh2" } },
   ],
   routes: [
     // ── Receive in 3 steps (Input → QC → Stock)
@@ -618,6 +652,35 @@ const initData = () => ({
           data: { name: "Replenish picking zone", action: "pull", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0,
                   domain: "[('product_id.qty_available', '<', 10)]" }},
       ]},
+    // ── Scrap (Stock → Virtual/Scrap) — no rule strictly required; Odoo
+    // posts scrap moves directly. Modelled here as a route+rule for visual
+    // completeness so the canvas surfaces the scrap path.
+    { id: "route-scrap", label: "Scrap", colorIdx: 6,
+      data: { name: "WH: Scrap path", active: true, product_selectable: false, product_categ_selectable: false, warehouse_selectable: true, sale_selectable: false },
+      rules: [
+        { id: "rl-scrap1", label: "Stock → Scrap", action: "pull", procure_method: "make_to_stock", src_location_id: "loc-stock", dest_location_id: "loc-scrap", picking_type_id: "op-scrap", auto: "manual",
+          data: { name: "Scrap goods", action: "pull", procure_method: "make_to_stock", auto: "manual", propagate_cancel: false, delay: 0 } },
+      ] },
+
+    // ── Inter-warehouse Resupply (WH ↔ WH2) — no vendor/customer endpoints,
+    // only stock movement between the two warehouses via a shared Transit
+    // location. Two routes: one direction per route, both selectable on
+    // products.
+    { id: "route-iw-12", label: "Resupply WH2 from WH", colorIdx: 7,
+      data: { name: "Inter-WH: WH → WH2", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false },
+      __autoGen: { warehouseId: "wh2", source: "resupply:wh1" },
+      rules: [
+        { id: "rl-iw-out-1", label: "WH/Stock → Transit",     action: "pull", procure_method: "make_to_order", src_location_id: "loc-stock",       dest_location_id: "loc-transit-12",  picking_type_id: "op-iw-out",  auto: "manual",      data: { name: "WH → Transit",             action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-1",  label: "Transit → WH2/Stock",    action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-12",   dest_location_id: "loc-wh2-stock",   picking_type_id: "op-iw-in",   auto: "transparent", data: { name: "Transit → WH2",            action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
+      ] },
+    { id: "route-iw-21", label: "Resupply WH from WH2", colorIdx: 8,
+      data: { name: "Inter-WH: WH2 → WH", active: true, product_selectable: true, product_categ_selectable: true, warehouse_selectable: true, sale_selectable: false },
+      __autoGen: { warehouseId: "wh1", source: "resupply:wh2" },
+      rules: [
+        { id: "rl-iw-out-2", label: "WH2/Stock → Transit",    action: "pull", procure_method: "make_to_order", src_location_id: "loc-wh2-stock",    dest_location_id: "loc-transit-12",  picking_type_id: "op-iw-out-2", auto: "manual",      data: { name: "WH2 → Transit",            action: "pull", procure_method: "make_to_order", auto: "manual",      propagate_cancel: true, delay: 0 } },
+        { id: "rl-iw-in-2",  label: "Transit → WH/Stock",     action: "pull", procure_method: "make_to_order", src_location_id: "loc-transit-12",   dest_location_id: "loc-stock",       picking_type_id: "op-iw-in-2",  auto: "transparent", data: { name: "Transit → WH",             action: "pull", procure_method: "make_to_order", auto: "transparent", propagate_cancel: true, delay: 1 } },
+      ] },
+
     // ── Cold-Chain Storage (push rule with domain — perishables route past QC into Cold Room)
     // Demonstrates: action=push, domain filter on the rule, sub-location as destination.
     // Domain follows Odoo 19 stock_move.py: filtered_domain runs against stock.move,

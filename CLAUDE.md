@@ -333,6 +333,20 @@ Shipped in `30302de` using approach **A** (parent-render + sub-loc badge on main
 
 Shipped in `30302de`. Putaway simulator + StorageCategoryModal both consume the o2m; `data.storageCategories[i].capacity_ids` round-trips through JSON export.
 
+#### 🟦 Cross-company stub edges (faded "to company X" indicators)
+
+When a node or warehouse is hidden by the company filter, rules that
+cross the boundary currently disappear from the canvas — the edge
+silently vanishes along with its endpoint. **Proposed**: render the
+boundary-crossing rule as a faded stub edge that fades out toward the
+hidden side, like off-map roads on cartographic maps. The stub would
+end ~80px past the visible edge with the label "to <Company X> · <hidden node label>"
+appended along the fade. Tooltip on hover names the company + hidden
+endpoint and hints "Switch to <Company X> to see the rest". Same idea
+applies to drill-in scope (`drillIntoType === 'warehouse'`) where a
+rule's other endpoint is in a different warehouse — fade rather than
+clip. Effort: medium; touches the rule-edge render path.
+
 #### 🟦 Per-product `capacity_ids` fetch from Odoo (later phase)
 
 `fetchInventoryFromOdoo` still reads `stock.storage.category` with name + allow_new_product + max_weight only — the o2m fetch is on a TODO. Snippet:
