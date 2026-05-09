@@ -162,9 +162,9 @@ Eight features shipped overnight on `main`. The pure-module test suite is at **2
 - ✅ **Putaway storage strategies** — `storage_strategy` (manual_no_strategy / closest_location / least_packages) and `storage_category_id` surfaced per putaway rule. `storage_category_id` also added to location field schema. Generated API code includes the new fields in fetch templates.
 - ✅ **Templates append mode** — every template card now has Replace + "+ Add" buttons. Add merges with id-remapping (`tXXXX-` prefix) and dedupes shared semantic locations (Vendors/Customers map to existing canvas nodes). One undo step.
 - ✅ **Drag warehouse blob with contents** — dragging a warehouse node now drags all its child locations as a rigid group (children identified by `complete_name` prefix OR `__autoGen.warehouseId` tag). Op-type blobs follow automatically because their endpoints moved. Heavier stroke on the blob during drag for visual feedback. Disabled when multi-select is active to avoid double-handling.
-- 🟡 **Storage categories + capacity** (partial) — `capacity` numeric field added to locations; canvas shows monospace badge below internal locations when `capacity` or `storage_category_id` is set. **Sub-location nested view, capacity-based putaway algorithm, multi-level location trees still pending — needs the long Q&A pass.** TODO comments in code mark the location.
-- 🟡 **Sequence numbers on import** (partial) — `backfillSequences()` helper auto-fills missing putaway `sequence` (`(i+1)*10`) and op-type `sequence_code` (3-char prefix from label initials) on both JSON-import and Odoo-fetch paths. **Warehouse `code` autogen, route `sequence` semantics, prefix-collision resolution, in-canvas sequence display still pending — needs Q&A.**
-- ⏸ **Miro export/import** (nice-to-have) — explicitly deferred. Warehouses → Miro frames; locations → blocks; rules → arrows; routes → colour groups. To be tackled in a future pass.
+- ✅ **Storage categories + capacity** — sub-location nested-canvas view, drill-in, capacity-based putaway simulator, per-product `capacity_ids` from storage category, multi-level trees as real nodes (`location_id` parent pointers, up to 50 levels). Shipped in `30302de`.
+- 🟡 **Sequence numbers on import** (partial) — `backfillSequences()` helper auto-fills missing putaway `sequence` (`(i+1)*10`) and op-type `sequence_code` (3-char prefix from label initials) on both JSON-import and Odoo-fetch paths. **Tail-end work pending: must first read Odoo source (`stock.warehouse._compute_xxx_sequence_id`, `stock.picking.type._default_sequence_code`) to map exact behaviour, then pick — warehouse `code` autogen rule, route `sequence` priority semantics, sequence_code collision resolution, whether to render sequence on canvas.**
+- ✅ **Miro export** — JSON shipped in `be7850d`; VSDX (the Miro-import-ready path that actually works) shipped in `5565954`.
 
 ### Brainstorming-pending items for the next session
 
@@ -221,27 +221,15 @@ Footer noting which entities are wizard-generated vs manual (read from __autoGen
 
 Implementation: pure function in a new `src/markdown-exporter.js` module, taking `data` and returning a string. Toolbar wire-up in App. No tests required initially; add Node test if it grows complex.
 
-#### 🟦 Export tool: Excel for Odoo import
+#### ❌ Export tool: Excel for Odoo import — **dropped from scope (2026-05-09)**
 
-Generate an `.xlsx` (or CSV bundle) ready to import into Odoo via the standard Import wizard. One sheet per model. Each sheet has an `id` (external_id) column and m2o references resolved by external_id.
-
-**Sheet matrix**:
-
-| Sheet | Odoo model | Key columns |
-|-------|-----------|-------------|
-| `stock.warehouse` | `stock.warehouse` | id, name, code, reception_steps, delivery_steps, manufacture_steps, manufacture_to_resupply, buy_to_resupply, resupply_wh_ids/id |
-| `stock.location` | `stock.location` | id, name, complete_name, usage, location_id/id, removal_strategy_id, storage_category_id/id |
-| `stock.picking.type` | `stock.picking.type` | id, name, code, sequence_code, default_location_src_id/id, default_location_dest_id/id, warehouse_id/id |
-| `stock.route` | `stock.route` | id, name, sequence, product_selectable, product_categ_selectable, warehouse_selectable, sale_selectable |
-| `stock.rule` | `stock.rule` | id, name, route_id/id, action, picking_type_id/id, location_src_id/id, location_dest_id/id, procure_method, auto, propagate_cancel, delay, domain |
-| `stock.putaway.rule` | `stock.putaway.rule` | id, location_in_id/id, location_out_id/id, product_id/id, category_id/id, sequence, storage_strategy, storage_category_id/id |
-
-Use a small client-side library (e.g. `xlsx` from npm — needs adding to deps) OR generate CSVs zipped together. CSV-bundle is simpler (no new dep) and the Odoo Import wizard takes CSVs natively.
-
-**Open questions**:
-- External-id naming: `__import__.<canvas_id>` or a slugified `<model>_<code>`?
-- How to handle mixed-source canvases (some entities from Fetch, some manually added)? The fetched ones have real Odoo ids; the manual ones need new ones.
-- Round-trip: should the import re-use the same external_ids on second export, so edits update in place?
+Originally proposed as an alternate path into Odoo. Dropped because the
+existing **Push to Odoo** flow (live JSON-RPC writes against the running
+instance) covers the round-trip case, and the **Markdown export** covers
+human-readable handover. An Excel/CSV intermediary adds an external-id
+strategy to maintain (`__import__.<canvas_id>` vs slugified) and a
+mixed-source-canvas merge story for marginal benefit. If a customer
+specifically asks for an offline-import bundle, revisit then.
 
 #### 🟨 Push-rule domain preset proposals (research notes)
 
@@ -301,16 +289,17 @@ Before implementing Miro export, the following decisions need answers:
 
 Given Brecht flagged this as "next phase" + "nice-to-have", target: a 1-page proposal with ASCII mockups answering 1-10, then user picks before coding.
 
-#### Next-up scope (priority order)
+#### Next-up scope (priority order, refreshed 2026-05-09 evening)
 
-When picking next, the order Brecht likely wants:
-
-1. ✅ **MD export** — landed 2026-05-09; pure module + command-palette + toolbar entry.
-2. ✅ **Push-rule domain preset additions** — landed 2026-05-09; 28 presets across 4 collapsible categories. Source verification still pending (Odoo source not on this machine).
-3. **Storage categories brainstorm** (medium) — needs the long Q&A pass before any code.
-4. **Sequence numbers brainstorm** (small Q&A).
-5. **Excel/CSV Odoo import export** (medium-large) — requires choosing the external-id strategy.
-6. **Miro brainstorm Q&A** (small Q&A), then implementation (medium-large).
+1. ✅ **MD export** — landed 2026-05-09.
+2. ✅ **Push-rule domain preset additions** — landed 2026-05-09. Source verified (`/tmp/odoo19/`).
+3. ✅ **Storage categories deep dive** — shipped in `30302de`.
+4. ✅ **Seed data with sub-loc rules + push+domain example** — shipped (Cold-Chain push rule + Fast Pick sub-loc-as-src rule with weight domain).
+5. **Sequence numbers — research-then-map** (small) — read Odoo source (`stock.warehouse`, `stock.picking.type._default_sequence_code`) first to map exact behaviour, then decide what to surface in the canvas. **Up next.**
+6. **Push-blob neighbour avoidance** (small) — flag-only highlight on drop (option 4 from the proposed approaches); no auto-shove.
+7. **Putaway-centric viz** (medium) — see "Putaway/Storage-categories dedicated view (proposal needed)" below.
+8. ❌ **Excel/CSV Odoo import** — dropped; Push to Odoo + MD export cover the workflows.
+9. ❌ **Miro REST integration** — dropped; VSDX export already gives Miro a working import path.
 
 ### Roadmap wave 3 (captured 2026-05-09 morning, post-Q&A)
 
@@ -328,65 +317,25 @@ Items from the user's morning pass:
 
 #### 🟦 Roadmap deferred (with proposals)
 
-- **Push warehouse-blob neighbours away on drag** — when dragging a warehouse blob, locations *not* belonging to that warehouse (Vendors, Customers, Inventory Loss, other warehouses' children) should be pushed away to avoid overlap. **Proposed approaches**:
-  1. **Soft repulsion**: simple distance-based force; nearby non-children get nudged radially with a falloff. Cheap; can produce jittery results on dense layouts.
-  2. **Hard collision-avoidance**: AABB collision check after drop; resolve overlaps by translating non-children outward along the shortest axis until clear. Stable but only fires post-drop.
-  3. **Lane reflow**: re-run partial auto-layout on drop, freezing the dragged warehouse's children and re-flowing only the rest. Most "correct" but visually disruptive.
-  4. **Show conflict highlight + don't auto-fix**: flash overlapping non-children in red on drop and let the user decide. Lowest risk.
-  Recommended: option 4 (flag-only) for v1, then option 2 (post-drop AABB shove) for v1.5 once the heuristics feel right.
+- **Push warehouse-blob neighbours away on drag** — picked **option 4** (flag-only highlight). On drop, AABB-check non-children of the dragged warehouse against the moved set; flash overlapping non-children in red for ~600ms and let the user decide. No auto-shove. Options 1/2/3 (soft repulsion / hard collision avoidance / lane reflow) recorded for posterity but not on the roadmap.
 
-- **Multi-company support** — selector to pick company (or set of companies); only show entities `company_id`-matched. **Proposed shape**:
-  1. Add `company_ids: number[]` to canvas state (multi-select).
-  2. Toolbar dropdown "Companies: [All] / [Konu BV] / [Subsidiary 1] / [+ multi-select]".
-  3. On Fetch from Odoo, set domain `[('company_id', 'in', selected_ids)]` on every model query. Add `company_id` to the field schema for warehouses/locations/routes/picking-types/rules/putaway-rules.
-  4. Canvas-side: filter all rendered nodes/routes/op-types by `data.company_id` against the selected set. Entities without `company_id` (legacy) render in all.
-  5. Provenance: `__autoGen` doesn't change; just an extra dimension on filtering.
-  6. Cross-company resupply (rare but possible) renders in both lanes.
-  Open question: does the wizard need a company picker too? Yes — defaults to user's company, multi-company users pick.
+- ✅ **Multi-company support** — shipped in `c9f24ef` and `be7850d`. Per-entity `company_id` round-trips with Odoo; toolbar filter dims everything outside the selected set.
 
 - ✅ **Push-rule domain proposals — Odoo source cross-check (done 2026-05-09)** — Odoo 19 source was at `/tmp/odoo19/` (not `~/odoo/19.0/`). Critical finding from `stock_move.py` line ~1145: `move.filtered_domain(literal_eval(rule.push_domain))`. Domain runs against `stock.move` records DIRECTLY. **All `move_id.X` prefixes were wrong** — fixed in commit batch with this note. Confirmed-existing fields: `product_id`, `partner_id` (line 93), `location_id`, `location_dest_id`, `priority`, `route_ids`, `picking_id`, `production_id`/`raw_material_production_id` (mrp), `purchase_line_id` (purchase_stock), `sale_line_id` (sale_stock), `picking_id.carrier_id` (delivery), `origin_returned_move_id`. Module-dependent presets are documented inline so users know which addon must be installed for each.
 
 ### Roadmap wave 4 (captured 2026-05-09, post-storage-categories)
 
-#### 🟦 Sub-locations as `src/dst` of regular `stock.rule` records
+#### ✅ Sub-locations as `src/dst` of regular `stock.rule` records
 
-Today the storage-categories ship makes sub-locations real graph nodes (with `location_id` parent pointers) and adds a drill-in view. Putaway rules can target sub-locations via `location_out_id`. **Regular pull/push/manufacture rules cannot yet src/dst at the sub-location level on the main canvas** — they're top-level only. Visualization proposals (pick one when you tackle this):
+Shipped in `30302de` using approach **A** (parent-render + sub-loc badge on main, real sub-edge in drill-in). Seed data showcases this — `route-replenish` (Storage→Picking), `route-cold-chain` (QC→Cold push with domain), `route-fastpick` (Picking Stock→Packing pull with weight domain).
 
-| # | Approach | Pros | Cons |
-|---|---|---|---|
-| **A** (recommended) | **Render rule between parents + small badge for sub-target** — `Stock →[Bin 1] Customers` on main canvas; drill-in shows the actual sub-edge. | Keeps main canvas readable. Top-level flow visible. Drill-in for detail. | Two layers of truth (canvas summary + drill-in detail). |
-| B | **Promote sub-location to a pinnable top-level node** — user marks "show on main canvas" per sub-location. Pinned ones render alongside top-level. | User control. Cluttery only if user opts in. | Adds a `pinned: boolean` field; UI for marking. |
-| C | **Two-step render** — main shows rule between parents; hover/click reveals a popover with sub-target detail. | Zero clutter by default. | Sub-location info only visible on interaction. |
-| D | **Property panel only** — no canvas visualization; the rule's PropPanel shows sub-target. Canvas always renders top-level. | Simplest. | Sub-location semantics invisible without selection. |
-| E | **Always render sub-locations on main canvas** — flatten the hierarchy onto one canvas. | One source of truth. | Big warehouses become unreadable. |
+#### ✅ Per-product capacity rules within a storage category (`capacity_ids` o2m)
 
-Implementation outline for (A):
-1. Extend `fieldDefs.rule` `src_location_id` and `dest_location_id` to support sub-location selection (tree-grouped dropdown).
-2. In edge render: if `rule.src_location_id` is a sub-location, render the edge from its top-level ancestor instead. Compute via `ancestorPath()`.
-3. Add a small `[<sub-loc-label>]` badge near the rule's edge midpoint when src or dst is a sub-location.
-4. Drill-in view picks up the rule edge naturally (its real src/dst are sub-locations).
+Shipped in `30302de`. Putaway simulator + StorageCategoryModal both consume the o2m; `data.storageCategories[i].capacity_ids` round-trips through JSON export.
 
-Effort: ~half day. Builds directly on `src/location-tree.js` already shipped.
+#### 🟦 Per-product `capacity_ids` fetch from Odoo (later phase)
 
-#### 🟦 Per-product capacity rules within a storage category (Odoo's `capacity_ids` o2m)
-
-Odoo's `stock.storage.category.capacity_ids` is a o2m of `(product, qty)` (and similarly `(package_type, qty)`) pairs. The visualiser's `data.storageCategories[].capacity_qty` is a single number — applies uniformly. To honour Odoo's actual model:
-
-```js
-data.storageCategories[i].capacity_ids = [
-  { product: 'FURN_7800 Office Desk', qty: 5 },
-  { product: 'ELEC_001 Laptop', qty: 50 },
-  // …else fallback to the category's `capacity_qty`
-];
-```
-
-The putaway simulator (`src/putaway-simulator.js`) already takes `capacity_qty` from the location's `data.capacity_qty`. To consume per-product capacity:
-- When matching a rule, look up `category.capacity_ids` for the product's row; use its `qty` as the capacity for THAT product on that location. If no row, use `category.capacity_qty` default.
-- Surface the table inside the StorageCategoryModal as an expandable row (per-category sub-table).
-
-#### 🟦 Per-product capacity_ids fetch from Odoo
-
-Currently `fetchInventoryFromOdoo` reads `stock.storage.category` with name + allow_new_product + max_weight only — capacity_ids o2m fetch is deferred (TODO comment in code). Once the per-product capacity UI lands, extend the fetch:
+`fetchInventoryFromOdoo` still reads `stock.storage.category` with name + allow_new_product + max_weight only — the o2m fetch is on a TODO. Snippet:
 
 ```python
 cats = sr('stock.storage.category', [], ['name', 'allow_new_product', 'max_weight', 'capacity_ids'])
@@ -395,22 +344,17 @@ caps = sr('stock.storage.category.capacity', [('storage_category_id', 'in', [c.i
 # Group caps by storage_category_id → assemble capacity_ids per category
 ```
 
-Add to `data.storageCategories[i].capacity_ids` after the cats fetch. Best-effort; degrade silently if the model is absent.
+Best-effort; degrade silently if the model is absent. Not on the immediate roadmap.
 
-#### 🟦 Improved example data — sub-locations + sub-loc rules
+#### ✅ Improved example data — sub-locations + sub-loc rules
 
-The seed `initData()` (and template builders) currently generate top-level locations only. Now that sub-locations are real nodes, the example data should showcase them:
+Shipped 2026-05-09 evening. Five sub-locations under `WH/Stock` (Bulk, Storage, Picking, Cold, Returns) each with `storage_category_id`. Three demo routes exercising sub-locations:
 
-- Add a few children of `WH/Stock`: `Storage Stock` (mass-storage area), `Picking Stock` (fast-pick zone), `Bulk Stock` (pallets), `Returns Quarantine`.
-- Each child gets a `storage_category_id` (Pallet for Bulk, Bin for Picking).
-- Add 1-2 illustrative `stock.rule` records targeting these sub-locations:
-  - `Picking Stock → Packing` (pull MTO) — front-of-house pick path
-  - `Storage Stock → Picking Stock` (pull MTS, replenishment internal transfer)
-  - Push rule example with `domain` set ("only when product has BOM" → pushes to Bulk Stock)
-- Update relevant putaway rules to use the new `location_out_id` (m2o) instead of just `location_out` strings.
-- Showcase the sub-location-as-rule-src/dst feature once that lands (#50 above).
+- `route-replenish` — Storage Stock → Picking Stock (pull MTS, internal transfer)
+- `route-cold-chain` — QC → Cold Room (push with `use_expiration_date` domain, sub-loc dst)
+- `route-fastpick` — Picking Stock → Packing (pull MTO with `weight < 5kg` domain, sub-loc src)
 
-This will make the demo canvas immediately demonstrate the drill-in + heatmap + simulator features. ~half-day.
+Putaway rules use a mix of `location_out_id` (modern m2o) and `location_out` (legacy string) styles to demonstrate coexistence. Storage categories carry per-product `capacity_ids` examples for Pallet and Bin.
 
 #### 🟦 AI tool integration
 
@@ -508,27 +452,64 @@ DRBB has 38 warehouses on one canvas. Even with virtualisation, comprehension be
 
 Effort: ~1 day. Strongly complementary to multi-company filter.
 
-#### 🟦 max_volume on storage categories (DRBB-specific custom field)
+#### ❌ max_volume on storage categories — **dropped from scope (2026-05-09)**
 
-DRBB customised `stock.storage.category` with a `max_volume` field (m³) and overrode `_check_can_be_used()` on `stock.location` to validate that incoming goods fit. Currently the visualiser only models `max_weight` and `capacity_qty`. Proposed:
+DRBB-only customisation; standard Odoo's `stock.storage.category` has `max_weight`, not volume. Generalising the visualiser around a single customer's overlay isn't worth the field-schema bloat. If DRBB needs the custom field surfaced for their export, it goes in a customer-specific overlay (similar to how customer-specific push-rule presets would be handled), not in the core schema.
 
-- Add `max_volume: number` field on storage category data.
-- StorageCategoryModal table grows a Max volume column.
-- Putaway simulator: if product has a `volume` attribute (input ctx) and the resolved location's category has `max_volume`, check it.
-- Mark this as customer-specific in code — many Odoo installs don't have it.
+#### 🟦 Putaway-/storage-categories-centric dedicated view (proposal)
 
-Effort: ~half day.
+The current canvas is **route/rule-centric** — routes drive the colouring,
+rules are the edges, op-types are the pills. Putaway rules and storage
+categories are second-class: they live in the PutawayPanel + the
+StorageCategoryModal, and the canvas only hints at them via location
+badges.
 
-#### 🟦 Auto-migration: path-string putaway rules → real sub-location nodes
+For warehouses where putaway is the dominant configuration burden (DRBB:
+9,865 putaway rules vs 605 stock rules — 16× more), the
+route/rule view is the wrong primary lens. Proposed: a parallel
+**"Putaway view"** mode (toolbar toggle, alongside Standard/Advanced),
+where:
 
-The user explicitly opted out at brainstorming time ("keep both — strings and nodes coexist"). If the choice ever flips, the migration logic:
+| Aspect | Route/rule view (today) | Putaway view (proposed) |
+|---|---|---|
+| Canvas primary entities | Locations, op-type pills | Locations, **storage categories as labelled regions/zones** |
+| Edges | `stock.rule` (pull/push/manufacture) | `stock.putaway.rule` (input → output) |
+| Edge colour | by route `colorIdx` | by storage strategy (`manual_no_strategy` / `closest_location` / `least_packages`) |
+| Sidebar (left) | Routes + rules | **Storage categories** (with capacity heatmap) + putaway rule sequence |
+| Sidebar (right) | Rule PropPanel | Putaway rule PropPanel |
+| Drill-in | Sub-locations | Sub-locations + which putaway rule resolves there |
 
-1. Scan all putaway rules with non-empty `location_out` and empty `location_out_id`.
-2. Parse the path: split by `/`, walk from the rule's `location_in_id` up the implied tree, materializing missing segments as new `stock.location` nodes with proper `location_id` parents.
-3. Set the rule's `location_out_id` to the leaf node id; leave `location_out` for back-compat.
-4. One-shot, all-or-nothing, with undo restoration in a single history step.
+Three approaches for the toggle (pick when starting):
 
-Surfacing: an "Migrate path strings to nodes" action in the Add menu / a one-time banner on import. Not automatic — user-triggered.
+| # | Approach | Description |
+|---|---|---|
+| **A** (recommended) | **Mode toggle on the toolbar** — `[Routes/Rules] [Putaway]` segmented control. Same canvas, rebound. | Cheapest. One canvas, two interpretations of the same data. |
+| B | **Split-screen / tabbed** — top half routes/rules, bottom half putaway, synchronised pan. | Comparison-friendly but tight on screen real estate. |
+| C | **Separate route under `/putaway` URL** — full-page dedicated view with its own state. | Cleanest mental model, most work — needs its own command palette, viewport state, etc. |
+
+Implementation sketch for **A**:
+1. Add `viewMode: 'flow' | 'putaway'` to canvas state, default `'flow'`. Toolbar button toggles.
+2. In `'putaway'`:
+   - Hide `stock.rule` edges and op-type pills.
+   - Render putaway-rule edges instead: from `location_in_id` (top-level) to `location_out_id` (sub-loc, with badge if drill-in is needed).
+   - Edge thickness scales with `sequence` priority (lower = thicker).
+   - Edge colour by `storage_strategy`.
+   - Left sidebar swaps from routes-tree to a storage-categories tree (each category lists its capacity stats + which locations carry it). Selecting a category dims edges/locations not tagged with it.
+   - Right sidebar swaps RulePropPanel for PutawayRulePropPanel (already exists in PutawayPanel; promoted to right rail).
+3. Drill-in still works: into a location → show its sub-tree + the putaway rules that resolve there + capacity heatmap by sub-location.
+4. The `simulatePutaway` modal remains the primary "trace it" tool — its trace highlights the matching edge in the new view.
+
+Open questions (to answer before coding):
+- **Storage categories as zones?** Should categories render as coloured background regions (like a heatmap) under the locations they're attached to, or just as a sidebar list with locations linked? The first is more visual but adds layout cost.
+- **Capacity overlay** — visualise capacity utilisation (from `_quantsByLocation` cache) as a fill bar inside each location, or only on demand (hover/select)?
+- **Path-string migration** — if a putaway rule still uses `location_out` (legacy string) without `location_out_id`, render it dimly to flag that it should be migrated, or skip silently?
+
+Note: the older "auto-migration: path-string → real sub-location nodes" idea
+(which was opt-out at brainstorming time) folds naturally into this view —
+the "migrate" affordance becomes a one-click action on each legacy rule
+when surfaced in the new view.
+
+Effort: A is ~1-2 days; B is ~half-day extra layout; C is ~3-4 days.
 
 #### Code audit (no changes — proposals only)
 
