@@ -5340,44 +5340,73 @@ export default function App() {
               );
             })}
 
-            {/* SUB-LOCATION → PARENT CONNECTORS — for every sub-location
-                that's currently visible on the main canvas (rule-connected,
-                pinned, or under an inline-expanded parent), draw a faint
-                dashed line from the sub-loc's anchor to its nearest visible
-                ancestor. Pure decoration: makes the parent-child relationship
-                legible without forcing drill-in. Skipped in drill-in modes
-                (those have their own layout cues — tree edges, breadcrumbs). */}
+            {/* PARENT-GROUP BLOBS — soft rounded boundary that encloses
+                each parent location together with all its currently
+                visible children (sub-locations that are rule-connected,
+                pinned, or under an inline-expanded parent). Same visual
+                language as warehouse + view blobs but smaller padding
+                and lower opacity so it reads as a tertiary grouping cue.
+                A small "↳ N sub" label tag sits on the top-left edge so
+                the grouping is unambiguous even at low zoom. Skipped in
+                drill-in modes — those have their own layout cues. */}
             {!drillInto && (() => {
-              const lines = [];
+              // Group visible sub-locs by their nearest visible ancestor.
+              const groups = new Map(); // ancestorId → [child node...]
               for (const node of data.nodes) {
                 if (node.type !== 'location' || !node.data?.location_id) continue;
                 if (!visibleSubLocs.has(node.id)) continue;
-                // Walk up the parent chain to the first visible ancestor.
                 let parent = nodeById.get(node.data.location_id), depth = 0;
                 while (parent && depth < 50) {
-                  // Top-level location (no location_id) — always visible.
                   if (!parent.data?.location_id) break;
-                  // Sub-location ancestor that is itself currently visible.
                   if (visibleSubLocs.has(parent.id)) break;
                   parent = nodeById.get(parent.data.location_id);
                   depth++;
                 }
                 if (!parent || parent.id === node.id) continue;
-                const sx = (node.x + NW / 2) * scale + offset.x;
-                const sy = (node.y + NH / 2) * scale + offset.y;
-                const px = (parent.x + NW / 2) * scale + offset.x;
-                const py = (parent.y + NH / 2) * scale + offset.y;
-                lines.push(
-                  <line key={`sub-parent-${node.id}`}
-                        x1={px} y1={py} x2={sx} y2={sy}
-                        stroke={T.borderLight}
-                        strokeWidth={Math.max(0.8, scale * 0.9)}
-                        strokeOpacity={0.35}
-                        strokeDasharray={`${3 * scale} ${4 * scale}`}
-                        pointerEvents="none" />
+                if (!groups.has(parent.id)) groups.set(parent.id, []);
+                groups.get(parent.id).push(node);
+              }
+              const PAD_GROUP = 24;
+              const blobs = [];
+              for (const [parentId, kids] of groups) {
+                const parent = nodeById.get(parentId);
+                if (!parent) continue;
+                let minX = parent.x, minY = parent.y;
+                let maxX = parent.x + NW, maxY = parent.y + NH;
+                for (const k of kids) {
+                  if (k.x < minX) minX = k.x;
+                  if (k.y < minY) minY = k.y;
+                  if (k.x + NW > maxX) maxX = k.x + NW;
+                  if (k.y + NH > maxY) maxY = k.y + NH;
+                }
+                minX -= PAD_GROUP; minY -= PAD_GROUP;
+                maxX += PAD_GROUP; maxY += PAD_GROUP;
+                const sxg = minX * scale + offset.x;
+                const syg = minY * scale + offset.y;
+                const swg = (maxX - minX) * scale;
+                const shg = (maxY - minY) * scale;
+                const isSelG = sel?.id === parentId;
+                const gcol = T.sky;
+                blobs.push(
+                  <g key={`parentblob-${parentId}`} pointerEvents="none">
+                    <title>{`${parent.label} — parent of ${kids.length} visible sub-location${kids.length === 1 ? '' : 's'}`}</title>
+                    <rect x={sxg} y={syg} width={swg} height={shg}
+                          rx={Math.min(22, Math.min(swg, shg) / 7)}
+                          ry={Math.min(22, Math.min(swg, shg) / 7)}
+                          fill={`${gcol}0a`} stroke={gcol}
+                          strokeWidth={isSelG ? 1.6 : 1.1}
+                          strokeDasharray={`${5 * scale} ${4 * scale}`}
+                          strokeOpacity={isSelG ? 0.55 : 0.3} />
+                    <foreignObject x={sxg + 8 * scale} y={syg - 10 * scale} width={220} height={20} style={{ overflow: "visible" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "1px 6px", background: T.surface, border: `1px solid ${gcol}66`, borderRadius: 3, whiteSpace: "nowrap", userSelect: "none" }}>
+                        <span style={{ fontSize: 9 * Math.max(scale, 0.85), fontWeight: 700, color: gcol, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.4px" }}>↳ {parent.label}</span>
+                        <span style={{ fontSize: 8 * Math.max(scale, 0.85), color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>{kids.length} sub</span>
+                      </div>
+                    </foreignObject>
+                  </g>
                 );
               }
-              return lines;
+              return blobs;
             })()}
 
             {/* OP TYPE WASH — faded color rect per op-type, only in 'pills_wash' mode.

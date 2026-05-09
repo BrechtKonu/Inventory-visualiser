@@ -425,9 +425,9 @@ For narrow / split-screen viewports where the toolbar got cut off and the right 
 - Defensive overflow rules in the build template: `html, body, #root` get `overflow: hidden` + `width: 100%` so nothing spills outside the viewport. App root uses `width: 100%; height: 100vh; maxHeight: 100%`.
 - **NB**: an earlier attempt set the App root to `width: 100vw` and added an auto-compact / auto-hide-sidebars resize listener — both were reverted. `100vw` includes the vertical-scrollbar gutter on Windows browsers (~17px), and the auto-compact made icons appear "bigger" because labels disappeared. Manual control via the explicit toggles + the existing `⇲ compact` button is enough.
 
-#### ✅ Sub-loc → parent visual connector (current commit)
+#### ✅ Parent-group blobs for visible sub-locations
 
-Every visible sub-location (rule-connected, pinned, or under an inline-expanded parent) draws a faint dashed line from its anchor to its nearest visible ancestor's anchor. Pure decoration: makes the parent-child relationship legible without forcing drill-in. Stroke = `T.borderLight` at 0.35 opacity, dashed `3 4` at scale. Skipped in drill-in modes.
+Every parent location with at least one visible sub-location (rule-connected, pinned, or under an inline-expanded parent) is wrapped in a soft rounded-rect blob that encloses the parent + all its visible children with a small padding. Same visual language as warehouse + view-location blobs, scaled down: `T.sky` stroke at 0.3 opacity, dashed `5 4` at scale, fill `T.sky` at ~4% opacity. A small `↳ <Parent label> · N sub` tag sits on the top-left edge so the grouping is unambiguous even at low zoom or without colour. Replaces the earlier per-child dashed line — a single shape per group reads cleaner than many overlapping connectors. Skipped in drill-in modes (those have their own layout cues — tree edges + breadcrumbs).
 
 #### ❌ Putaway dedicated view — reverted
 
