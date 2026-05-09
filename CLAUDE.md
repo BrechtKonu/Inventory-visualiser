@@ -345,16 +345,7 @@ Items from the user's morning pass:
   6. Cross-company resupply (rare but possible) renders in both lanes.
   Open question: does the wizard need a company picker too? Yes — defaults to user's company, multi-company users pick.
 
-- **Push-rule domain proposals — Odoo source cross-check** — the 28 presets in `DOMAIN_PRESETS` are based on my Odoo-19 knowledge but Odoo source wasn't on this disk to verify (CLAUDE.md mentions `~/odoo/19.0/odoo/` should exist; it didn't). When next at a workstation with Odoo cloned, run:
-  ```bash
-  grep -rn "domain.*move\|_eval_route_rule\|_eval_push_rule" ~/odoo/19.0/odoo/addons/stock/
-  grep -rn "quality_point\|trigger_rule_id" ~/odoo/19.0/enterprise/quality/
-  ```
-  Verify each preset's leaf field exists on the right model. Likely fixes:
-  - `('move_id.partner_id', ...)` — confirm partner_id is reachable on stock.move (it's typically on picking_id, not move directly).
-  - `('product_id.product_tag_ids.name', ...)` — verify product_tag_ids is on product.product (not just product.template).
-  - `('product_id.last_purchase_date', ...)` — verify field exists; might be on partner not product.
-  - `('product_id.quality_alert_count', ...)` — Enterprise-only; flag in description.
+- ✅ **Push-rule domain proposals — Odoo source cross-check (done 2026-05-09)** — Odoo 19 source was at `/tmp/odoo19/` (not `~/odoo/19.0/`). Critical finding from `stock_move.py` line ~1145: `move.filtered_domain(literal_eval(rule.push_domain))`. Domain runs against `stock.move` records DIRECTLY. **All `move_id.X` prefixes were wrong** — fixed in commit batch with this note. Confirmed-existing fields: `product_id`, `partner_id` (line 93), `location_id`, `location_dest_id`, `priority`, `route_ids`, `picking_id`, `production_id`/`raw_material_production_id` (mrp), `purchase_line_id` (purchase_stock), `sale_line_id` (sale_stock), `picking_id.carrier_id` (delivery), `origin_returned_move_id`. Module-dependent presets are documented inline so users know which addon must be installed for each.
 
 ### Roadmap wave 4 (captured 2026-05-09, post-storage-categories)
 
@@ -406,6 +397,50 @@ caps = sr('stock.storage.category.capacity', [('storage_category_id', 'in', [c.i
 ```
 
 Add to `data.storageCategories[i].capacity_ids` after the cats fetch. Best-effort; degrade silently if the model is absent.
+
+#### 🟦 Improved example data — sub-locations + sub-loc rules
+
+The seed `initData()` (and template builders) currently generate top-level locations only. Now that sub-locations are real nodes, the example data should showcase them:
+
+- Add a few children of `WH/Stock`: `Storage Stock` (mass-storage area), `Picking Stock` (fast-pick zone), `Bulk Stock` (pallets), `Returns Quarantine`.
+- Each child gets a `storage_category_id` (Pallet for Bulk, Bin for Picking).
+- Add 1-2 illustrative `stock.rule` records targeting these sub-locations:
+  - `Picking Stock → Packing` (pull MTO) — front-of-house pick path
+  - `Storage Stock → Picking Stock` (pull MTS, replenishment internal transfer)
+  - Push rule example with `domain` set ("only when product has BOM" → pushes to Bulk Stock)
+- Update relevant putaway rules to use the new `location_out_id` (m2o) instead of just `location_out` strings.
+- Showcase the sub-location-as-rule-src/dst feature once that lands (#50 above).
+
+This will make the demo canvas immediately demonstrate the drill-in + heatmap + simulator features. ~half-day.
+
+#### 🟦 AI tool integration
+
+Open-ended: integrate AI assistance directly into the visualiser. Possible directions (pick after Brecht's brainstorm):
+
+1. **"Explain this setup"** — given the current canvas, produce a plain-English description (warehouse layout, key flows, bottlenecks). Reuses the markdown-exporter output as input to an LLM call. Off-canvas summary panel.
+2. **"Suggest improvements"** — LLM reads the canvas + Odoo best-practice corpus, suggests structural improvements (e.g. "you have a 3-step delivery but no QC route — add one?"). Surfaces as a new sidebar card.
+3. **"Generate from prompt"** — natural-language → wizard config. User types "set up a warehouse for a perishable food retailer with cold-chain QC" and the AI fills the warehouse-preset wizard form. Conversational creation.
+4. **"Find bug / inconsistency"** — heuristic + LLM check for common misconfigurations (orphan rules, contradictory route flags, unreachable locations, capacity rules referencing missing categories).
+5. **"Putaway domain helper"** — LLM-assisted domain composition: user describes intent in English ("only for hazmat in cold zone"), AI proposes the Odoo domain expression.
+6. **Two-way Odoo MCP** — when the user has an Odoo instance configured, the AI can query/modify it through the existing proxy. Ties this tool into the broader agentic-engineering setup.
+
+Auth: API key in `apiCfg` extended with an LLM provider section. Privacy: never auto-send canvas data; always behind an explicit user action.
+
+Effort estimate: a small slice (one of the 6 above) is ~1 day. Full integration is a multi-week thread. **Brainstorm before coding** — too many design choices to default sensibly.
+
+#### 🟦 UI/UX for huge warehouses
+
+Current rendering and interactions assume <50 locations / <30 routes. Real customer warehouses can have 500+ locations and 100+ routes. Needs an audit + concrete improvements:
+
+- **Virtualised rendering** — only render nodes/edges within the current viewport. Today every node is in the SVG even if off-screen. SVG can handle ~1k nodes but performance dies above that.
+- **Cluster mode** — nodes within a small distance group into a single cluster bubble; zoom-in expands. Pattern from Cytoscape.js / Sigma.js.
+- **Search-driven navigation** — `/` opens command palette; should let user type a location/rule name to jump-zoom-and-select. Already half-there via the existing palette.
+- **Filter mode** — sidebar gains "Show only routes touching X" filter; canvas dims everything else.
+- **Multi-canvas tabs** — for warehouses with disjoint flow zones, allow saving named viewports ("inbound zone", "outbound zone", "manufacturing") and switching between them.
+- **Performance instrumentation** — measure first-paint, drag-jank, autolayout time as a function of node count. Set a budget (e.g. <100ms/frame at 500 nodes).
+- **Sub-location collapse** — even with the drill-in view, the main canvas could let parents collapse sub-tree summaries when the user wants a "everything at one zoom" view.
+
+Pick 2-3 highest-value items after a measurement pass on a real customer canvas. Effort: ~3-5 days for a meaningful chunk.
 
 #### 🟦 Auto-migration: path-string putaway rules → real sub-location nodes
 

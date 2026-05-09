@@ -120,15 +120,21 @@ function dashFor(border, scale) {
 // Each entry is a single condition tuple; "Wrap in [...]" turns the
 // comma-joined result into a valid Odoo domain list.
 //
-// Field-accuracy note: push-rule domains in Odoo 17+ are evaluated against
-// stock.move records. Product fields are reachable via `product_id.<field>`;
-// product.template fields via `product_id.product_tmpl_id.<field>`.
-// Some presets use customer-specific fields (e.g. shelf-life) — flagged with
-// "(non-standard)" so users know to swap in their actual field path.
+// VERIFIED 2026-05-09 against Odoo 19 source (/tmp/odoo19/odoo/addons/stock/):
+// `push_domain` is evaluated via `move.filtered_domain(literal_eval(...))` in
+// stock.move._push_apply — i.e. domain runs against stock.move records DIRECTLY
+// (not via a move_id indirection). Field paths therefore start with stock.move
+// attributes: product_id, partner_id, location_id, location_dest_id, priority,
+// route_ids, picking_id, etc. (See stock_move.py line ~1145.)
 //
-// TODO: cross-verify against ~/odoo/19.0/odoo/addons/stock/ when Odoo source
-// is available on this machine. Several presets reference fields that exist
-// in stock.module + quality.module enterprise; verify trimmed/non-standard.
+// Module dependencies of certain presets:
+//   - production_id, raw_material_production_id        → mrp module
+//   - purchase_line_id                                  → purchase_stock module
+//   - sale_line_id                                      → sale_stock module
+//   - picking_id.carrier_id                             → delivery module
+//   - product_id.quality_alert_count                    → quality (enterprise)
+// These presets only resolve at evaluation time when their module is installed;
+// they're harmless if absent (the rule simply won't match).
 const DOMAIN_PRESETS = [
   {
     category: "Product properties",
@@ -152,20 +158,24 @@ const DOMAIN_PRESETS = [
     presets: [
       { label: "has QC route", description: "Product is on a Quality Control route", expression: "('product_id.route_ids.name', 'ilike', 'Quality')" },
       { label: "stock in location", description: "Product has stock somewhere (edit location name)", expression: "('product_id.stock_quant_ids.location_id.complete_name', 'ilike', 'WH/Stock')" },
-      { label: "from specific vendor", description: "From a specific vendor (edit name)", expression: "('move_id.partner_id.name', 'ilike', 'Acme')" },
-      { label: "returned from customer", description: "Returns from customer location (refurb routing)", expression: "('move_id.location_id.usage', '=', 'customer')" },
-      { label: "drop-shipping", description: "Direct supplier→customer move", expression: "('move_id.location_id.usage', '=', 'supplier'), ('move_id.location_dest_id.usage', '=', 'customer')" },
+      { label: "from specific vendor", description: "From a specific vendor (edit name)", expression: "('partner_id.name', 'ilike', 'Acme')" },
+      { label: "returned from customer", description: "Returns from customer location (refurb routing)", expression: "('location_id.usage', '=', 'customer')" },
+      { label: "drop-shipping", description: "Direct supplier→customer move", expression: "('location_id.usage', '=', 'supplier'), ('location_dest_id.usage', '=', 'customer')" },
+      { label: "internal transfer", description: "Internal-to-internal move only", expression: "('location_id.usage', '=', 'internal'), ('location_dest_id.usage', '=', 'internal')" },
       { label: "user's company", description: "Restrict to current user's company", expression: "('company_id', '=', user.company_id.id)" },
     ],
   },
   {
     category: "Triggering doc",
     presets: [
-      { label: "manufactured here", description: "Output of a manufacturing order", expression: "('move_id.production_id', '!=', False)" },
-      { label: "from purchase order", description: "Vendor receipt only", expression: "('move_id.purchase_line_id', '!=', False)" },
-      { label: "sales-driven", description: "Customer-order-driven moves", expression: "('move_id.sale_line_id', '!=', False)" },
-      { label: "specific carrier", description: "Delivery via specific carrier (edit name)", expression: "('move_id.picking_id.carrier_id.name', 'ilike', 'DHL')" },
-      { label: "urgent priority", description: "High-priority moves (priority='1')", expression: "('move_id.priority', '=', '1')" },
+      { label: "manufactured here", description: "Output of a manufacturing order (mrp module)", expression: "('production_id', '!=', False)" },
+      { label: "raw material for MO", description: "Component issued to manufacturing (mrp module)", expression: "('raw_material_production_id', '!=', False)" },
+      { label: "from purchase order", description: "Vendor receipt only (purchase_stock module)", expression: "('purchase_line_id', '!=', False)" },
+      { label: "sales-driven", description: "Customer-order-driven moves (sale_stock module)", expression: "('sale_line_id', '!=', False)" },
+      { label: "specific carrier", description: "Delivery via specific carrier (delivery module; edit name)", expression: "('picking_id.carrier_id.name', 'ilike', 'DHL')" },
+      { label: "urgent priority", description: "High-priority moves (priority='1')", expression: "('priority', '=', '1')" },
+      { label: "operation type code", description: "Filter by picking-type code (incoming/internal/outgoing/mrp_operation)", expression: "('picking_id.picking_type_id.code', '=', 'incoming')" },
+      { label: "is return", description: "Return moves only", expression: "('origin_returned_move_id', '!=', False)" },
       { label: "reorder rule active", description: "Has an active orderpoint", expression: "('product_id.orderpoint_ids.active', '=', True)" },
     ],
   },
