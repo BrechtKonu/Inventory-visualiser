@@ -878,23 +878,108 @@ function buildEdgeOffsetMap(routes) {
 
 // ─── PUTAWAY RULES PANEL ────────────────────────────────────────────────────
 const PutawayPanel = ({ locationId, locationLabel, rules, onUpdate, onAdd, onDelete, onClose }) => {
-  const locRules = rules.filter(r => r.location_in_id === locationId).sort((a, b) => a.sequence - b.sequence);
+  const locRules = useMemo(
+    () => rules.filter(r => r.location_in_id === locationId).sort((a, b) => (a.sequence ?? 999) - (b.sequence ?? 999)),
+    [rules, locationId]
+  );
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  // Filter the rules by the search query (matches product / category /
+  // location_out / storage_category_id / sequence). Empty query = all.
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return locRules;
+    return locRules.filter(r =>
+      (r.product || "").toLowerCase().includes(q) ||
+      (r.category || "").toLowerCase().includes(q) ||
+      (r.location_out || "").toLowerCase().includes(q) ||
+      (r.storage_category_id || "").toLowerCase().includes(q) ||
+      String(r.sequence ?? "").includes(q)
+    );
+  }, [locRules, filter]);
+  const PAGINATE_AT = 50;
+  const PAGE_SIZE = 30;
+  const paginated = filtered.length > PAGINATE_AT && !showAll
+    ? filtered.slice(0, PAGE_SIZE)
+    : filtered;
+  const allVisibleIds = paginated.map(r => r.id);
+  const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selected.has(id));
+  const toggleAllVisible = () => setSelected(prev => {
+    const n = new Set(prev);
+    if (allVisibleSelected) allVisibleIds.forEach(id => n.delete(id));
+    else allVisibleIds.forEach(id => n.add(id));
+    return n;
+  });
+  const bulkShiftSeq = (delta) => {
+    selected.forEach(id => {
+      const r = locRules.find(x => x.id === id);
+      if (r) onUpdate(id, { sequence: (r.sequence ?? 0) + delta });
+    });
+  };
+  const bulkSetStrategy = (strategy) => {
+    selected.forEach(id => onUpdate(id, { storage_strategy: strategy }));
+  };
+  const bulkDelete = () => {
+    if (!confirm(`Delete ${selected.size} putaway rule(s)?`)) return;
+    [...selected].forEach(id => onDelete(id));
+    setSelected(new Set());
+  };
 
   return (
-    <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 400, background: T.surface, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 35, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+    <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 35, fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 26, height: 26, borderRadius: 5, background: T.violetSoft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>⇲</div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Putaway Rules</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Putaway Rules <span style={{ color: T.textDim, fontWeight: 400 }}>({locRules.length})</span></div>
             <div style={{ fontSize: 10, color: T.textSoft }}>{locationLabel}</div>
           </div>
         </div>
         <Btn variant="ghost" small icon="close" onClick={onClose} />
       </div>
 
-      {/* Column headers */}
-      <div style={{ display: "flex", padding: "8px 16px 4px", gap: 6, borderBottom: `1px solid ${T.border}` }}>
+      {/* Filter input — shown when ≥10 rules; pure UI, doesn't mutate. */}
+      {locRules.length >= 10 && (
+        <div style={{ padding: "6px 12px", borderBottom: `1px solid ${T.border}55` }}>
+          <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder={`Filter ${locRules.length} rules by product / category / location…`}
+            style={{ width: "100%", padding: "5px 8px", background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 10, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          {filter && filtered.length !== locRules.length && (
+            <div style={{ marginTop: 3, fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>{filtered.length} match{filtered.length === 1 ? '' : 'es'}</div>
+          )}
+        </div>
+      )}
+
+      {/* Bulk-ops bar — shown only when something is selected. */}
+      {selected.size > 0 && (
+        <div style={{ padding: "6px 12px", borderBottom: `1px solid ${T.border}55`, background: T.accentSoft, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: T.accent, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>{selected.size} selected</span>
+          <button onClick={() => bulkShiftSeq(+10)} title="Add 10 to sequence on all selected"
+            style={{ padding: "2px 6px", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>seq +10</button>
+          <button onClick={() => bulkShiftSeq(-10)}
+            style={{ padding: "2px 6px", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>seq −10</button>
+          <select onChange={e => { if (e.target.value) bulkSetStrategy(e.target.value); e.target.value = ''; }}
+            defaultValue=""
+            style={{ padding: "2px 4px", background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text, fontSize: 10, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>
+            <option value="">set strategy…</option>
+            <option value="manual_no_strategy">Manual</option>
+            <option value="closest_location">Closest location</option>
+            <option value="least_packages">Least packages</option>
+          </select>
+          <span style={{ flex: 1 }} />
+          <button onClick={bulkDelete}
+            style={{ padding: "2px 6px", background: "transparent", border: `1px solid ${T.rose}55`, color: T.rose, fontSize: 10, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>delete</button>
+          <button onClick={() => setSelected(new Set())}
+            style={{ padding: "2px 6px", background: "transparent", border: `1px solid ${T.border}`, color: T.textDim, fontSize: 10, borderRadius: 3, cursor: "pointer", fontFamily: "inherit" }}>clear</button>
+        </div>
+      )}
+
+      {/* Column headers + select-all checkbox */}
+      <div style={{ display: "flex", padding: "8px 16px 4px", gap: 6, borderBottom: `1px solid ${T.border}`, alignItems: "center" }}>
+        <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible}
+          title="Select all visible rules"
+          style={{ marginRight: 4 }} />
         <span style={{ width: 28, fontSize: 8, fontWeight: 700, color: T.textDim, textTransform: "uppercase" }}>Seq</span>
         <span style={{ flex: 1, fontSize: 8, fontWeight: 700, color: T.textDim, textTransform: "uppercase" }}>Product / Category</span>
         <span style={{ flex: 1, fontSize: 8, fontWeight: 700, color: T.textDim, textTransform: "uppercase" }}>Store to</span>
@@ -905,10 +990,17 @@ const PutawayPanel = ({ locationId, locationLabel, rules, onUpdate, onAdd, onDel
         {locRules.length === 0 && (
           <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 11, color: T.textDim }}>No putaway rules for this location yet.</div>
         )}
-        {locRules.map(rule => (
-          <div key={rule.id} style={{ padding: "6px 16px", borderBottom: `1px solid ${T.border}08` }}
-            onMouseEnter={e => e.currentTarget.style.background = T.surfaceHover} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        {locRules.length > 0 && filtered.length === 0 && (
+          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 11, color: T.textDim, fontStyle: "italic" }}>No rules match the filter.</div>
+        )}
+        {paginated.map(rule => (
+          <div key={rule.id} style={{ padding: "6px 16px", borderBottom: `1px solid ${T.border}08`, background: selected.has(rule.id) ? T.accentSoft + "55" : "transparent" }}
+            onMouseEnter={e => { if (!selected.has(rule.id)) e.currentTarget.style.background = T.surfaceHover; }}
+            onMouseLeave={e => { if (!selected.has(rule.id)) e.currentTarget.style.background = "transparent"; }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={selected.has(rule.id)}
+                onChange={(e) => setSelected(prev => { const n = new Set(prev); e.target.checked ? n.add(rule.id) : n.delete(rule.id); return n; })}
+                style={{ marginRight: 0 }} />
               <input type="number" value={rule.sequence} onChange={e => onUpdate(rule.id, { sequence: parseInt(e.target.value) || 0 })}
                 style={{ width: 28, padding: "3px 4px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 3, color: T.violet, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace", outline: "none", textAlign: "center", boxSizing: "border-box" }} />
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -939,6 +1031,15 @@ const PutawayPanel = ({ locationId, locationLabel, rules, onUpdate, onAdd, onDel
           </div>
         ))}
       </div>
+
+      {/* Show-all footer when paginated */}
+      {filtered.length > PAGINATE_AT && !showAll && (
+        <button onClick={() => setShowAll(true)}
+          style={{ padding: "6px 16px", background: T.surfaceHover, border: "none", borderTop: `1px solid ${T.border}`,
+            color: T.accent, fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
+          Show all {filtered.length} (currently showing first {PAGE_SIZE})
+        </button>
+      )}
 
       <div style={{ padding: "8px 16px", borderTop: `1px solid ${T.border}` }}>
         <button onClick={() => onAdd(locationId)} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "7px 8px", background: "transparent", border: `1px dashed ${T.border}`, borderRadius: 5, cursor: "pointer", fontFamily: "inherit" }}
@@ -2659,10 +2760,14 @@ export default function App() {
   // 'hidden'     = no pills/wash by default; reveal a pill when its rule is hovered or selected
   const [opVizMode, setOpVizMode] = useState('pills');
   const [hoveredRuleId, setHoveredRuleId] = useState(null);
-  // Drill-in viewport: when set to a location id, the canvas filters to
-  // descendants of that location. null = main canvas. Persisted in URL hash
-  // is overkill; in-memory state is enough — drill-in is a transient view.
+  // Drill-in viewport: when set, the canvas filters to scope. Two modes:
+  //   - drillIntoType='location': descendants of drillInto (sub-loc tree)
+  //   - drillIntoType='warehouse': all entities tagged with that warehouseId
+  //                                or whose label/code matches the warehouse
+  // null = main canvas. Persisted in URL hash is overkill; in-memory state
+  // is enough — drill-in is a transient view.
   const [drillInto, setDrillInto] = useState(null);
+  const [drillIntoType, setDrillIntoType] = useState('location'); // 'location' | 'warehouse'
   const [drillShowPutaway, setDrillShowPutaway] = useState(true);
   const [drillShowCategories, setDrillShowCategories] = useState(true);
   const [drillShowHeatmap, setDrillShowHeatmap] = useState(false);
@@ -3439,7 +3544,11 @@ export default function App() {
       { id: "duplicate", icon: "⎘", label: "Duplicate", hotkey: "Ctrl+D", run: () => duplicateItem(type, id) },
       ...(type === "location" ? [
         { divider: true },
-        { id: "drill",  icon: "⌖", label: "Open sub-locations →", run: () => setDrillInto(id) },
+        { id: "drill",  icon: "⌖", label: "Open sub-locations →", run: () => { setDrillIntoType('location'); setDrillInto(id); } },
+      ] : []),
+      ...(type === "warehouse" ? [
+        { divider: true },
+        { id: "drill-wh", icon: "⌖", label: "Open warehouse scope →", run: () => { setDrillIntoType('warehouse'); setDrillInto(id); } },
       ] : []),
       { divider: true },
       { id: "front", icon: "⤒", label: "Bring to Front", hotkey: "Ctrl+]", run: () => zReorder("front") },
@@ -4883,14 +4992,19 @@ export default function App() {
           {drillInto && (() => {
             const pivot = data.nodes.find(n => n.id === drillInto);
             if (!pivot) return null;
-            // Build path from root → pivot via location_id chain.
+            // Build path from root → pivot. For warehouses, just the warehouse.
+            // For locations, the location_id ancestor chain.
             const path = [];
-            let cur = pivot, depth = 0;
-            while (cur && depth < 50) {
-              path.unshift(cur);
-              const pid = cur.data?.location_id;
-              cur = pid ? data.nodes.find(n => n.id === pid) : null;
-              depth++;
+            if (drillIntoType === 'warehouse') {
+              path.push(pivot);
+            } else {
+              let cur = pivot, depth = 0;
+              while (cur && depth < 50) {
+                path.unshift(cur);
+                const pid = cur.data?.location_id;
+                cur = pid ? data.nodes.find(n => n.id === pid) : null;
+                depth++;
+              }
             }
             return (
               <div style={{ position: "absolute", top: 8, left: 8, right: 8, zIndex: 30,
@@ -4901,7 +5015,7 @@ export default function App() {
                 <button onClick={() => setDrillInto(null)} title="Back to main canvas (Esc)"
                   style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text,
                     fontSize: 11, padding: "3px 8px", borderRadius: 4, fontFamily: "inherit", cursor: "pointer" }}>← back</button>
-                <span style={{ color: T.textDim }}>Sub-locations of</span>
+                <span style={{ color: T.textDim }}>{drillIntoType === 'warehouse' ? 'Warehouse:' : 'Sub-locations of'}</span>
                 {path.map((n, i) => (
                   <React.Fragment key={n.id}>
                     {i > 0 && <span style={{ color: T.textDim }}>›</span>}
@@ -5249,8 +5363,9 @@ export default function App() {
               });
             })()}
 
-            {/* DRILL-IN LAYERS — only render when drillInto is set. */}
-            {drillInto && (() => {
+            {/* DRILL-IN LAYERS — only render in location-drill (sub-tree view).
+                Warehouse-drill keeps the regular route-edges layer. */}
+            {drillInto && drillIntoType === 'location' && (() => {
               const layers = [];
               const pivot = data.nodes.find(n => n.id === drillInto);
               if (!pivot) return null;
@@ -5340,8 +5455,9 @@ export default function App() {
               return layers;
             })()}
 
-            {/* ROUTE RULE EDGES — hidden in drill-in mode. */}
-            {!drillInto && (() => {
+            {/* ROUTE RULE EDGES — visible on main canvas AND in warehouse drill-in.
+                Hidden only in location drill-in (which uses its own layer set). */}
+            {(!drillInto || drillIntoType === 'warehouse') && (() => {
               const edgeOffsets = edgeOffsetMap;
               return data.routes.map(route => {
                 if (hidden.has(route.id)) return null;
@@ -5354,6 +5470,21 @@ export default function App() {
                   if (!sn || !dn) return null;
                   if (clusterMode) return null; // cluster mode hides individual edges
                   if (!isEdgeInViewport(sn, dn)) return null;
+                  // Warehouse drill-in: only show rules where both endpoints
+                  // belong to this warehouse OR are shared (supplier/customer/inventory).
+                  if (drillInto && drillIntoType === 'warehouse') {
+                    const wh = data.nodes.find(n => n.id === drillInto);
+                    const code = wh?.data?.code || '';
+                    const belongsToWh = (n) => {
+                      if (!n || n.type !== 'location') return false;
+                      const u = n.data?.usage;
+                      if (u === 'supplier' || u === 'customer' || u === 'inventory') return true;
+                      if (n.__autoGen?.warehouseId === drillInto) return true;
+                      const cn = n.data?.complete_name || n.label || '';
+                      return code && (cn === code || cn.startsWith(code + '/'));
+                    };
+                    if (!belongsToWh(sn) || !belongsToWh(dn)) return null;
+                  }
                   // Sub-location remap (option A from roadmap #50): on the main
                   // canvas (no drillInto), if src or dst is a sub-location, walk
                   // up its location_id chain to the top-level ancestor and use
@@ -5606,7 +5737,7 @@ export default function App() {
               // Drill-in viewport filter: when drillInto is set, show only the
               // pivot node + its descendants. Sub-locations (n.data.location_id set)
               // are HIDDEN on the main canvas; they only render in drill-in.
-              if (drillInto) {
+              if (drillInto && drillIntoType === 'location') {
                 const isPivot = node.id === drillInto;
                 const isDesc = node.type === "location" && (() => {
                   let cur = node, depth = 0;
@@ -5620,6 +5751,29 @@ export default function App() {
                   return false;
                 })();
                 if (!isPivot && !isDesc) return null;
+              } else if (drillInto && drillIntoType === 'warehouse') {
+                // Warehouse-scope filter: keep entities tagged with this warehouseId
+                // (via __autoGen) OR locations whose complete_name starts with the
+                // warehouse's code (matches Odoo's path convention "WH/Stock"),
+                // plus the warehouse node itself + supplier/customer/inventory
+                // (orienting context — they're shared across warehouses).
+                if (node.id === drillInto) {
+                  // pivot warehouse: always show
+                } else if (node.type === 'warehouse') {
+                  return null;  // hide other warehouses
+                } else if (node.type === 'location') {
+                  const u = node.data?.usage;
+                  if (u === 'supplier' || u === 'customer' || u === 'inventory') {
+                    // Keep — shared across warehouses
+                  } else {
+                    const tag = node.__autoGen?.warehouseId === drillInto;
+                    const wh = data.nodes.find(n => n.id === drillInto);
+                    const code = wh?.data?.code || '';
+                    const cn = node.data?.complete_name || node.label || '';
+                    const nameMatch = code && (cn === code || cn.startsWith(code + '/'));
+                    if (!tag && !nameMatch) return null;
+                  }
+                }
               } else {
                 // Main canvas: hide all sub-locations EXCEPT children of any
                 // parent the user has explicitly expanded inline.

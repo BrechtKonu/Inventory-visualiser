@@ -485,7 +485,7 @@ Built incrementally as features land. Quick wins shipped in commit `30302de`:
 - Per-warehouse drill-in scope (#66) — sized for DRBB's 38 warehouses.
 - max_volume on storage categories (#67) — DRBB-specific.
 
-#### 🟦 PutawayPanel collapsed-by-default (DRBB-driven)
+#### ✅ PutawayPanel collapsed-by-default (DRBB-driven, DONE)
 
 DRBB has 9,865 putaway rules. The current PutawayPanel renders all rules of a location as one flat list when that location is selected. At 100+ rules per location it becomes a wall. Proposed:
 
@@ -497,7 +497,7 @@ DRBB has 9,865 putaway rules. The current PutawayPanel renders all rules of a lo
 
 Effort: ~half day. Cross-cutting with the per-product capacity ui already shipped.
 
-#### 🟦 Per-warehouse drill-in scope (multi-warehouse comprehension)
+#### ✅ Per-warehouse drill-in scope (DRBB-driven, DONE)
 
 DRBB has 38 warehouses on one canvas. Even with virtualisation, comprehension benefits from "scope to one warehouse at a time". Proposed:
 
