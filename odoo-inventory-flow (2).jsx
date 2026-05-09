@@ -4,6 +4,7 @@
 
 import React, { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { presetGenerator, presetDiff } from "./src/warehouse-presets.js";
+import { exportMarkdown } from "./src/markdown-exporter.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
 const DARK_THEME = {
@@ -113,39 +114,70 @@ function dashFor(border, scale) {
 }
 
 // ─── DOMAIN PRESETS ─────────────────────────────────────────────────────────
-// Common Odoo domain expressions for push-rule applicability. Each preset is
-// a single condition tuple; the helper UI inserts them comma-joined and offers
-// a "Wrap in [...]" button to turn the result into a valid Odoo domain list.
+// Common Odoo domain expressions for push-rule applicability. Organized into
+// category buckets; the helper UI renders each bucket as a collapsible group.
+// Each entry is a single condition tuple; "Wrap in [...]" turns the
+// comma-joined result into a valid Odoo domain list.
+//
+// Field-accuracy note: push-rule domains in Odoo 17+ are evaluated against
+// stock.move records. Product fields are reachable via `product_id.<field>`;
+// product.template fields via `product_id.product_tmpl_id.<field>`.
+// Some presets use customer-specific fields (e.g. shelf-life) — flagged with
+// "(non-standard)" so users know to swap in their actual field path.
+//
+// TODO: cross-verify against ~/odoo/19.0/odoo/addons/stock/ when Odoo source
+// is available on this machine. Several presets reference fields that exist
+// in stock.module + quality.module enterprise; verify trimmed/non-standard.
 const DOMAIN_PRESETS = [
   {
-    label: "has QC route",
-    description: "Product is on the Quality Control route",
-    expression: "('route_ids.name','ilike','Quality')",
+    category: "Product properties",
+    presets: [
+      { label: "tracked product only", description: "Lot/serial-tracked items only", expression: "('product_id.tracking', 'in', ('lot', 'serial'))" },
+      { label: "needs expiration", description: "Perishable products with shelf life", expression: "('product_id.use_expiration_date', '=', True)" },
+      { label: "has product tag", description: "Tag-driven applicability (edit tag name)", expression: "('product_id.product_tag_ids.name', '=', 'priority')" },
+      { label: "product category", description: "Category-level rule (edit name)", expression: "('product_id.categ_id.complete_name', 'ilike', 'Electronics')" },
+      { label: "high-value", description: "Above price threshold (edit threshold)", expression: "('product_id.list_price', '>', 1000)" },
+      { label: "heavy", description: "Weight threshold for pallet routing (kg)", expression: "('product_id.weight', '>', 25)" },
+      { label: "bulky", description: "Volume threshold (m³)", expression: "('product_id.volume', '>', 0.5)" },
+      { label: "storable only", description: "Skip services and consumables", expression: "('product_id.type', '=', 'product')" },
+      { label: "sellable", description: "Sellable products", expression: "('product_id.sale_ok', '=', True)" },
+      { label: "purchasable", description: "Purchasable products", expression: "('product_id.purchase_ok', '=', True)" },
+      { label: "has variants", description: "Template with attribute variants", expression: "('product_id.product_tmpl_id.attribute_line_ids', '!=', False)" },
+      { label: "has BOM", description: "Manufacturable (has Bill of Materials)", expression: "('product_id.product_tmpl_id.bom_ids', '!=', False)" },
+    ],
   },
   {
-    label: "stock in location",
-    description: "Product has stock in a specific location (edit the value after insert)",
-    expression: "('stock_quant_ids.location_id.complete_name','ilike','WH/Stock')",
+    category: "Move source / context",
+    presets: [
+      { label: "has QC route", description: "Product is on a Quality Control route", expression: "('product_id.route_ids.name', 'ilike', 'Quality')" },
+      { label: "stock in location", description: "Product has stock somewhere (edit location name)", expression: "('product_id.stock_quant_ids.location_id.complete_name', 'ilike', 'WH/Stock')" },
+      { label: "from specific vendor", description: "From a specific vendor (edit name)", expression: "('move_id.partner_id.name', 'ilike', 'Acme')" },
+      { label: "returned from customer", description: "Returns from customer location (refurb routing)", expression: "('move_id.location_id.usage', '=', 'customer')" },
+      { label: "drop-shipping", description: "Direct supplier→customer move", expression: "('move_id.location_id.usage', '=', 'supplier'), ('move_id.location_dest_id.usage', '=', 'customer')" },
+      { label: "user's company", description: "Restrict to current user's company", expression: "('company_id', '=', user.company_id.id)" },
+    ],
   },
   {
-    label: "has product tag",
-    description: "Product has a specific tag (edit the tag name after insert)",
-    expression: "('product_tag_ids.name','=','priority')",
+    category: "Triggering doc",
+    presets: [
+      { label: "manufactured here", description: "Output of a manufacturing order", expression: "('move_id.production_id', '!=', False)" },
+      { label: "from purchase order", description: "Vendor receipt only", expression: "('move_id.purchase_line_id', '!=', False)" },
+      { label: "sales-driven", description: "Customer-order-driven moves", expression: "('move_id.sale_line_id', '!=', False)" },
+      { label: "specific carrier", description: "Delivery via specific carrier (edit name)", expression: "('move_id.picking_id.carrier_id.name', 'ilike', 'DHL')" },
+      { label: "urgent priority", description: "High-priority moves (priority='1')", expression: "('move_id.priority', '=', '1')" },
+      { label: "reorder rule active", description: "Has an active orderpoint", expression: "('product_id.orderpoint_ids.active', '=', True)" },
+    ],
   },
   {
-    label: "product category",
-    description: "Product belongs to a category (edit name after insert)",
-    expression: "('categ_id.name','=','Electronics')",
-  },
-  {
-    label: "on sale",
-    description: "Product is sellable",
-    expression: "('sale_ok','=',True)",
-  },
-  {
-    label: "is purchasable",
-    description: "Product is purchasable",
-    expression: "('purchase_ok','=',True)",
+    category: "Special cases",
+    presets: [
+      { label: "first receipt of product", description: "Never purchased before — initial QC always", expression: "('product_id.last_purchase_date', '=', False)" },
+      { label: "quality alert open", description: "Block until QA team closes the alert (enterprise)", expression: "('product_id.quality_alert_count', '>', 0)" },
+      { label: "route active", description: "Only when route is active", expression: "('route_ids.active', '=', True)" },
+      { label: "barcode prefix match", description: "Location/product barcode starts with X", expression: "('product_id.barcode', '=like', 'COLD-%')" },
+      { label: "needs serial number", description: "Serial-tracked products only", expression: "('product_id.tracking', '=', 'serial')" },
+      { label: "below reorder min", description: "Free qty below orderpoint min", expression: "('product_id.qty_available', '<', product_id.orderpoint_ids.product_min_qty)" },
+    ],
   },
 ];
 
@@ -1052,16 +1084,26 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
                   placeholder="[('field','operator','value')]"
                   rows={3}
                   style={{ width: "100%", background: T.surfaceRaised, border: `1px solid ${T.border}`, color: T.text, fontSize: 11, padding: 6, borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", resize: "vertical", outline: "none", boxSizing: "border-box" }} />
-                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-                  {DOMAIN_PRESETS.map(p => (
-                    <button key={p.label} type="button" title={p.description}
-                      onClick={() => insertPreset(p.expression)}
-                      style={presetBtnStyle}>+ {p.label}</button>
+                <div style={{ marginTop: 6 }}>
+                  {DOMAIN_PRESETS.map((group, gi) => (
+                    <details key={group.category} open={gi === 0} style={{ marginBottom: 4 }}>
+                      <summary style={{ fontSize: 10, color: T.textDim, cursor: "pointer", padding: "2px 0", userSelect: "none" }}>
+                        {group.category} <span style={{ color: T.textDim, opacity: 0.6 }}>({group.presets.length})</span>
+                      </summary>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, paddingLeft: 8, paddingTop: 4 }}>
+                        {group.presets.map(p => (
+                          <button key={p.label} type="button" title={p.description}
+                            onClick={() => insertPreset(p.expression)}
+                            style={presetBtnStyle}>+ {p.label}</button>
+                        ))}
+                      </div>
+                    </details>
                   ))}
-                  <span style={{ flex: 1 }} />
-                  <button type="button" title="Wrap the textarea content in [...] to form a valid Odoo domain list"
-                    onClick={wrapInBrackets}
-                    style={{ ...presetBtnStyle, color: T.accent, borderColor: T.accent + "55" }}>Wrap in [...]</button>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                    <button type="button" title="Wrap the textarea content in [...] to form a valid Odoo domain list"
+                      onClick={wrapInBrackets}
+                      style={{ ...presetBtnStyle, color: T.accent, borderColor: T.accent + "55" }}>Wrap in [...]</button>
+                  </div>
                 </div>
                 <div style={{ marginTop: 4, fontSize: 9, color: T.textDim, lineHeight: 1.4 }}>
                   Push-rule domain. Odoo evaluates this against the moving product. Multiple conditions: AND-joined.
@@ -1975,8 +2017,18 @@ const HelpModal = ({ onClose }) => {
               <div><Kbd>↑↓←→</Kbd> — Nudge 8px (<Kbd>Shift</Kbd> = 1px)</div>
               <div><Kbd>[</Kbd> / <Kbd>]</Kbd> — Send back / bring forward</div>
               <div><Kbd>Ctrl+[</Kbd> / <Kbd>Ctrl+]</Kbd> — To back / to front</div>
-              <div><Kbd>Space</Kbd> + drag — Pan from anywhere</div>
+              <div><Kbd>Space</Kbd> + drag — Pan from background</div>
+              <div><Kbd>Alt</Kbd> + drag — Pan from anywhere (over nodes too)</div>
+              <div><Kbd>Middle-click</Kbd> + drag — Pan from anywhere</div>
               <div><Kbd>Scroll</Kbd> — Zoom in/out at cursor</div>
+              <div><Kbd>Ctrl+S</Kbd> — Save (export JSON)</div>
+              <div><Kbd>Ctrl+O</Kbd> — Open (import JSON)</div>
+              <div><Kbd>Shift</Kbd> + click — Multi-select / lasso</div>
+              <div><Kbd>Shift</Kbd>+drag bg — Lasso-select</div>
+              <div><Kbd>Right-click</Kbd> bg — Quick-add menu (incl. wizard)</div>
+              <div><Kbd>1</Kbd> / <Kbd>2</Kbd> / <Kbd>3</Kbd> — Cycle op-viz mode</div>
+              <div><Kbd>L</Kbd> — Auto-layout</div>
+              <div><Kbd>0</Kbd> — Reset zoom / fit-to-content</div>
             </div>
           </Section>
 
@@ -2489,6 +2541,19 @@ export default function App() {
     w.document.close();
   }, [buildExportSvg]);
 
+  // Export the full setup as a Markdown handover document.
+  const handleExportMarkdown = useCallback(() => {
+    const md = exportMarkdown(data, { title: 'Warehouse Setup' });
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `warehouse-setup-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+  }, [data]);
+
   // Import diagram from JSON file
   const handleImport = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -2973,6 +3038,37 @@ export default function App() {
       // with Shift held, so requiring !shiftKey would block half of Europe.
       if (e.key === '/' && !cmd && !e.altKey) {
         e.preventDefault(); e.stopPropagation(); setPaletteOpen(true); return;
+      }
+      // Ctrl+S / Cmd+S — Save (export JSON)
+      if (cmd && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault(); e.stopPropagation();
+        if (typeof handleExport === 'function') handleExport();
+        return;
+      }
+      // Ctrl+O / Cmd+O — Open (import JSON)
+      if (cmd && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault(); e.stopPropagation();
+        importRef.current?.click();
+        return;
+      }
+      // 1 / 2 / 3 — cycle op-viz mode (when no modifier and outside inputs)
+      if (!cmd && !e.altKey && !e.shiftKey && (e.key === '1' || e.key === '2' || e.key === '3')) {
+        const modes = { '1': 'pills', '2': 'pills_wash', '3': 'hidden' };
+        setOpVizMode(modes[e.key]);
+        e.preventDefault();
+        return;
+      }
+      // L — auto-layout
+      if (!cmd && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        autoLayout();
+        return;
+      }
+      // 0 — fit-to-content
+      if (!cmd && e.key === '0') {
+        e.preventDefault();
+        fitToContent();
+        return;
       }
     };
     window.addEventListener('keydown', handler);
@@ -3662,6 +3758,16 @@ export default function App() {
   }, []);
 
   const onCanvasDown = useCallback((e) => {
+    // Anywhere-pan: Alt+drag (or middle mouse button) starts a pan, even on top of a node.
+    // This lets the user move the canvas without having to find empty background space.
+    if (e.altKey || e.button === 1) {
+      e.preventDefault();
+      setIsPan(true);
+      setPanSt({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+      downPosRef.current = { x: e.clientX, y: e.clientY, kind: "bg" };
+      dragThresholdRef.current = false;
+      return;
+    }
     if (e.target === svgRef.current || e.target.getAttribute("data-bg")) {
       // Placement mode: place node at click and exit mode
       if (placement) {
@@ -3891,17 +3997,36 @@ export default function App() {
 
   // When a route is selected, compute which nodes & rules belong to it for highlighting
   const routeHighlight = useMemo(() => {
-    if (sel?.type !== "route") return null;
-    const route = data.routes.find(r => r.id === sel.id);
-    if (!route) return null;
+    if (!sel) return null;
     const nodeIds = new Set();
     const ruleIds = new Set();
-    for (const rule of route.rules) {
-      ruleIds.add(rule.id);
-      if (rule.src_location_id) nodeIds.add(rule.src_location_id);
-      if (rule.dest_location_id) nodeIds.add(rule.dest_location_id);
+    const opIds = new Set();
+    if (sel.type === "route") {
+      const route = data.routes.find(r => r.id === sel.id);
+      if (!route) return null;
+      for (const rule of route.rules) {
+        ruleIds.add(rule.id);
+        if (rule.src_location_id) nodeIds.add(rule.src_location_id);
+        if (rule.dest_location_id) nodeIds.add(rule.dest_location_id);
+        if (rule.picking_type_id) opIds.add(rule.picking_type_id);
+      }
+    } else if (sel.type === "rule") {
+      // Find the rule + its parent route to highlight just that line.
+      for (const r of data.routes) {
+        const rule = r.rules.find(rl => rl.id === sel.id);
+        if (rule) {
+          ruleIds.add(rule.id);
+          if (rule.src_location_id) nodeIds.add(rule.src_location_id);
+          if (rule.dest_location_id) nodeIds.add(rule.dest_location_id);
+          if (rule.picking_type_id) opIds.add(rule.picking_type_id);
+          break;
+        }
+      }
+      if (ruleIds.size === 0) return null;
+    } else {
+      return null;
     }
-    return { routeId: sel.id, nodeIds, ruleIds };
+    return { routeId: sel.type === "route" ? sel.id : null, nodeIds, ruleIds, opIds };
   }, [sel, data.routes]);
 
   return (
@@ -3934,6 +4059,7 @@ export default function App() {
                 { id: "ex-svg",  icon: "✥",   label: "Export SVG (vector)", hint: "Infinite zoom · embeddable",   run: handleExportSvg },
                 { id: "ex-png",  icon: "▦",   label: "Export PNG (2× retina)", hint: "Slides, email, screenshots", run: handleExportPng },
                 { id: "ex-pdf",  icon: "▤",   label: "Export PDF (browser print)", hint: "Opens print dialog",     run: handleExportPdf },
+                { id: "ex-md",   icon: "✎",   label: "Export Markdown",            hint: "Project handover document", run: handleExportMarkdown },
               ]});
             }}>Export</Btn>
           <Btn small compact={compact} icon="download" onClick={() => importRef.current?.click()} variant="ghost" title="Import diagram from JSON">Import</Btn>
@@ -4084,7 +4210,7 @@ export default function App() {
               const wy = (e.clientY - r.top - offset.y) / scale - NH / 2;
               const items = [
                 { id: "add-loc",    icon: "◎", color: T.green,  label: "New Location",      run: () => doAdd("location",       { x: wx, y: wy }) },
-                { id: "add-wh",     icon: "⌂", color: T.accent, label: "New Warehouse",      run: () => doAdd("warehouse",      { x: wx, y: wy }) },
+                { id: "add-wh",     icon: "⌂", color: T.accent, label: "New Warehouse (wizard)", run: () => { setShowWizard(true); } },
                 { id: "add-op",     icon: "⛁", color: T.amber,  label: "New Operation Type", run: () => doAdd("operation_type") },
                 { id: "add-route",  icon: "⚡", color: T.sky,    label: "New Route",          run: () => doAdd("route") },
                 { divider: true },
@@ -4235,10 +4361,11 @@ export default function App() {
                 const sw = (maxX - minX) * scale, sh = (maxY - minY) * scale;
                 // Per-op stable hue (mid-saturation, mid-lightness so wash reads as colored)
                 const hue = hashColor(op.id, 60, 50);
+                const dimOp = routeHighlight && !routeHighlight.opIds.has(op.id);
                 return (
                   <rect key={`wash-${op.id}`} x={sx} y={sy} width={sw} height={sh}
                         rx={20 * scale} ry={20 * scale}
-                        fill={hue} fillOpacity={0.08} stroke="none" pointerEvents="none" />
+                        fill={hue} fillOpacity={dimOp ? 0.02 : 0.08} stroke="none" pointerEvents="none" />
                 );
               });
             })()}
@@ -4517,8 +4644,10 @@ export default function App() {
                   const py = mid.y - PILL_H / 2 + stackOff;
                   const fill = hashColor(op.id, 60, 35);
                   const isHi = sel?.id === op.id || sel?.id === rule.id || hoveredRuleId === rule.id;
+                  const dimPill = routeHighlight && !routeHighlight.opIds.has(op.id) && !routeHighlight.ruleIds.has(rule.id);
                   renders.push(
                     <g key={`pill-${rule.id}`}
+                       opacity={dimPill ? 0.18 : 1}
                        onClick={e => { e.stopPropagation(); doSelect(op.id); }}
                        onMouseEnter={() => setHoveredRuleId(rule.id)}
                        onMouseLeave={() => setHoveredRuleId(prev => prev === rule.id ? null : prev)}
@@ -4623,12 +4752,12 @@ export default function App() {
                         style={{ width: "100%", height: "100%", padding: "2px 6px", background: T.surfaceRaised, border: `1px solid ${T.accent}`, borderRadius: 4, color: T.text, fontSize: 13, fontFamily: "'IBM Plex Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
                     </foreignObject>
                   ) : (
-                    <text x={sx + (NW - 10) * scale} y={sy + (node.data?.usage ? NH * 0.38 : NH / 2) * scale} fontSize={13 * Math.max(scale, 0.55)} fontWeight={600} fill={T.text} fontFamily="'IBM Plex Sans', sans-serif" dominantBaseline="central" textAnchor="end" pointerEvents="none" style={{ userSelect: "none" }}>
+                    <text x={sx + (NW - 10) * scale} y={sy + (node.data?.usage ? NH * 0.38 : NH / 2) * scale} fontSize={15 * Math.max(scale, 0.55)} fontWeight={600} fill={T.text} fontFamily="'IBM Plex Sans', sans-serif" dominantBaseline="central" textAnchor="end" pointerEvents="none" style={{ userSelect: "none" }}>
                       {(() => { const parts = node.label.split("/"); const last = parts[parts.length - 1].trim(); return last.length > 24 ? last.slice(0, 24) + "…" : last; })()}
                     </text>
                   )}
                   {node.data?.usage && !editingLabel?.id && (
-                    <text x={sx + (NW - 10) * scale} y={sy + NH * 0.7 * scale} fontSize={9 * Math.max(scale, 0.55)} fill={T.textDim} fontFamily="'IBM Plex Mono', monospace" dominantBaseline="central" textAnchor="end" pointerEvents="none" style={{ userSelect: "none" }}>{node.data.usage}</text>
+                    <text x={sx + (NW - 10) * scale} y={sy + NH * 0.72 * scale} fontSize={10 * Math.max(scale, 0.55)} fill={T.textDim} fontFamily="'IBM Plex Mono', monospace" dominantBaseline="central" textAnchor="end" pointerEvents="none" style={{ userSelect: "none" }}>{node.data.usage}</text>
                   )}
                   {/* Connection ports — 4 sides + 4 corners. Invisible large hit-area + visible small dot, scale-up on hover */}
                   {["l", "r", "t", "b", "tl", "tr", "bl", "br"].map(side => {
@@ -4942,6 +5071,7 @@ export default function App() {
           { id: "data-svg",     group: "Data", label: "Export as SVG (vector)", icon: "✥", run: handleExportSvg },
           { id: "data-png",     group: "Data", label: "Export as PNG", icon: "▦", run: handleExportPng },
           { id: "data-pdf",     group: "Data", label: "Export as PDF (print)", icon: "▤", run: handleExportPdf },
+          { id: "data-md",      group: "Data", label: "Export as Markdown", icon: "✎", run: handleExportMarkdown },
           { id: "data-import",  group: "Data", label: "Import JSON…",   icon: "⬆", run: () => importRef.current?.click() },
           { id: "data-fetch",   group: "Data", label: "Fetch from Odoo", icon: "⏬", hint: KONU_CFG ? `Connection: ${KONU_CFG.connectionName}` : "Uses configured credentials", run: handleFetchFromOdoo },
           { id: "data-push",    group: "Data", label: "Push to Odoo",    icon: "⏫", hint: fetchedSnapshot ? "Diff against last fetch" : "Fetch first to enable", run: handlePushToOdoo },

@@ -305,10 +305,81 @@ Given Brecht flagged this as "next phase" + "nice-to-have", target: a 1-page pro
 
 When picking next, the order Brecht likely wants:
 
-1. **MD export** (small, high-utility, no auth) — ~half-day implementation.
-2. **Push-rule domain preset additions** (small) — half-day, mostly UI. Verify against Odoo source first.
+1. ✅ **MD export** — landed 2026-05-09; pure module + command-palette + toolbar entry.
+2. ✅ **Push-rule domain preset additions** — landed 2026-05-09; 28 presets across 4 collapsible categories. Source verification still pending (Odoo source not on this machine).
 3. **Storage categories brainstorm** (medium) — needs the long Q&A pass before any code.
 4. **Sequence numbers brainstorm** (small Q&A).
 5. **Excel/CSV Odoo import export** (medium-large) — requires choosing the external-id strategy.
 6. **Miro brainstorm Q&A** (small Q&A), then implementation (medium-large).
 7. **Plan C verification** (depends on having staging Odoo access).
+
+### Roadmap wave 3 (captured 2026-05-09 morning, post-Q&A)
+
+Items from the user's morning pass:
+
+#### ✅ Landed in this commit
+
+- **Drag from anywhere** — Alt+drag (or middle mouse button) pans the canvas, even over nodes. Help-modal updated.
+- **Right-click → New Warehouse opens the wizard** instead of placing an empty warehouse node.
+- **Op-types fade with route/rule selection** — when a route or rule is selected, the op-pill and op-wash for unrelated ops dim to opacity 0.18 (pills) / fillOpacity 0.02 (wash). The rule-selection highlight now also computes `opIds` so pills can fade alongside edges.
+- **Slightly bigger location-name font** — 13 → 15 on canvas labels; usage sub-label 9 → 10.
+- **More keyboard shortcuts**: `Ctrl+S` save (export JSON), `Ctrl+O` open (import JSON), `1`/`2`/`3` cycle op-viz mode, `L` auto-layout, `0` fit-to-content. Help modal reflects all new shortcuts.
+- **MD export** — pure module `src/markdown-exporter.js`; toolbar Export menu + command-palette entry.
+- **Push-rule preset expansion** — 28 presets across Product properties / Move source / Triggering doc / Special cases. Collapsible categories in the picker. Field-accuracy comment in source flags Odoo-source verification as still pending.
+
+#### 🟦 Roadmap deferred (with proposals)
+
+- **Push warehouse-blob neighbours away on drag** — when dragging a warehouse blob, locations *not* belonging to that warehouse (Vendors, Customers, Inventory Loss, other warehouses' children) should be pushed away to avoid overlap. **Proposed approaches**:
+  1. **Soft repulsion**: simple distance-based force; nearby non-children get nudged radially with a falloff. Cheap; can produce jittery results on dense layouts.
+  2. **Hard collision-avoidance**: AABB collision check after drop; resolve overlaps by translating non-children outward along the shortest axis until clear. Stable but only fires post-drop.
+  3. **Lane reflow**: re-run partial auto-layout on drop, freezing the dragged warehouse's children and re-flowing only the rest. Most "correct" but visually disruptive.
+  4. **Show conflict highlight + don't auto-fix**: flash overlapping non-children in red on drop and let the user decide. Lowest risk.
+  Recommended: option 4 (flag-only) for v1, then option 2 (post-drop AABB shove) for v1.5 once the heuristics feel right.
+
+- **Multi-company support** — selector to pick company (or set of companies); only show entities `company_id`-matched. **Proposed shape**:
+  1. Add `company_ids: number[]` to canvas state (multi-select).
+  2. Toolbar dropdown "Companies: [All] / [Konu BV] / [Subsidiary 1] / [+ multi-select]".
+  3. On Fetch from Odoo, set domain `[('company_id', 'in', selected_ids)]` on every model query. Add `company_id` to the field schema for warehouses/locations/routes/picking-types/rules/putaway-rules.
+  4. Canvas-side: filter all rendered nodes/routes/op-types by `data.company_id` against the selected set. Entities without `company_id` (legacy) render in all.
+  5. Provenance: `__autoGen` doesn't change; just an extra dimension on filtering.
+  6. Cross-company resupply (rare but possible) renders in both lanes.
+  Open question: does the wizard need a company picker too? Yes — defaults to user's company, multi-company users pick.
+
+- **Push-rule domain proposals — Odoo source cross-check** — the 28 presets in `DOMAIN_PRESETS` are based on my Odoo-19 knowledge but Odoo source wasn't on this disk to verify (CLAUDE.md mentions `~/odoo/19.0/odoo/` should exist; it didn't). When next at a workstation with Odoo cloned, run:
+  ```bash
+  grep -rn "domain.*move\|_eval_route_rule\|_eval_push_rule" ~/odoo/19.0/odoo/addons/stock/
+  grep -rn "quality_point\|trigger_rule_id" ~/odoo/19.0/enterprise/quality/
+  ```
+  Verify each preset's leaf field exists on the right model. Likely fixes:
+  - `('move_id.partner_id', ...)` — confirm partner_id is reachable on stock.move (it's typically on picking_id, not move directly).
+  - `('product_id.product_tag_ids.name', ...)` — verify product_tag_ids is on product.product (not just product.template).
+  - `('product_id.last_purchase_date', ...)` — verify field exists; might be on partner not product.
+  - `('product_id.quality_alert_count', ...)` — Enterprise-only; flag in description.
+
+#### Code audit (no changes — proposals only)
+
+A scan of the current state surfaces these maintenance items:
+
+1. **`odoo-inventory-flow (2).jsx` is ~5000 lines.** It's grown past comfortable single-file size. Proposed split:
+   - `src/canvas/` — SVG render layers (nodes, edges, pills, washes, blobs).
+   - `src/panels/` — PropPanel, PutawayPanel, ApiPanel, sidebars.
+   - `src/modals/` — AddModal, WizardModal, ShrinkDialog, ConfirmModals, HelpModal.
+   - `src/state/` — App-level state hooks (history, drag, selection, viewport).
+   - Main file becomes a ~200-line orchestrator. Risk: large refactor; defer until next major feature.
+
+2. **Dead op-blob code** is hidden behind `{false && ...}` since the op-viz rework. Lines ~4337+ and the auto-layout's `labelDx/Dy` computation. Should be removed in a cleanup pass; ~150 lines.
+
+3. **`hashColor`, `dashFor`, `nodeVisual`, `bestPorts` and several helpers** appear in TS-noisy diagnostics as "declared but never read" but ARE used (or were used). A cleanup pass should grep each and either rewire or delete.
+
+4. **Plan C worktree** (Create-in-Odoo) is parked at `worktree-agent-a109b0e7415c5da2d` — verify against staging Odoo before merging or delete.
+
+5. **No automated tests beyond `test:presets`** (25 assertions, all pure-module). Consider:
+   - Snapshot tests for `markdown-exporter.js` (low effort, high value).
+   - Unit tests for `presetDiff` edge cases (already partial — extend).
+   - Playwright/Puppeteer E2E for wizard create/edit flow (medium effort, high value but heavyweight).
+
+6. **TypeScript noise** — the project has no tsconfig but VS Code's TS server flags many issues. These are mostly cosmetic (unused imports, `labelDx` not on op-type — see (2) above). A `// @ts-nocheck` at the top of the JSX would silence them; the cleaner alternative is the file split in (1).
+
+7. **Provenance-tag opportunity**: `__autoGen` is currently used by Plans A/B for generation/regeneration. It could ALSO inform the future Excel-export's external_id strategy (`__import__.<source>__<warehouseId>__<localId>` for wizard-generated; `__manual__.<localId>` for user-added).
+
+8. **Single shared `data` object** is the canvas state-of-the-world, modified by ~20 different handlers. A reducer (with discriminated-union actions) would make undo/redo, history, and future collaboration features cleaner. Reducer migration is touchable in stages — wrap each `setData` site in a named action over time.
