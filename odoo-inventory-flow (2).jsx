@@ -245,8 +245,10 @@ const fieldDefs = {
       { value: "closest", label: "Closest" }, { value: "least_packages", label: "Least Packages" },
       { value: "fefo", label: "FEFO" },
     ]},
-    { key: "storage_category_id", label: "Storage Category", type: "ref", hint: "stock.storage.category" },
-    { key: "capacity", label: "Capacity", type: "number", hint: "Storage capacity (units left to user — typically max # of products / packages)" },
+    { key: "storage_category_id", label: "Storage Category", type: "m2o", source: "storage_category" },
+    { key: "capacity_qty", label: "Capacity (units)", type: "number", hint: "Max units of product this location holds" },
+    { key: "capacity_packages", label: "Capacity (packages)", type: "number", hint: "Max packages/pallets this location holds" },
+    { key: "capacity", label: "Capacity (legacy)", type: "number", hint: "Legacy single-field capacity — superseded by capacity_qty/packages" },
     { key: "scrap_location", label: "Scrap Location", type: "boolean" },
     { key: "return_location", label: "Return Location", type: "boolean" },
     { key: "replenish_location", label: "Replenish Location", type: "boolean" },
@@ -599,6 +601,11 @@ const initData = () => ({
     // WH/Pre-Production
     { id: "pa-16", location_in_id: "loc-preprod", location_out: "WH/Pre-Prod/Line 1", product: "", category: "Assemblies", sequence: 5 },
     { id: "pa-17", location_in_id: "loc-preprod", location_out: "WH/Pre-Prod/Line 2", product: "", category: "Components", sequence: 6 },
+  ],
+  storageCategories: [
+    { id: "cat-pallet", name: "Pallet",       allow_new_product: "same_product",   max_weight: 500, capacity_qty: 1   },
+    { id: "cat-bin",    name: "Bin",          allow_new_product: "mixed_products", max_weight: 50,  capacity_qty: 100 },
+    { id: "cat-cold",   name: "Cold Storage", allow_new_product: "mixed_products", max_weight: 0,   capacity_qty: 200 },
   ],
 });
 
@@ -1015,6 +1022,7 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
               : f.source === "warehouse" ? data.nodes.filter(n => n.type === "warehouse")
               : f.source === "operation_type" ? data.operationTypes
               : f.source === "route" ? data.routes
+              : f.source === "storage_category" ? (data.storageCategories || [])
               : [];
             // Self-reference safety: a location/warehouse/route can't be its own parent.
             opts = opts.filter(o => o.id !== id);
@@ -2317,6 +2325,13 @@ export default function App() {
   // 'hidden'     = no pills/wash by default; reveal a pill when its rule is hovered or selected
   const [opVizMode, setOpVizMode] = useState('pills');
   const [hoveredRuleId, setHoveredRuleId] = useState(null);
+  // Drill-in viewport: when set to a location id, the canvas filters to
+  // descendants of that location. null = main canvas. Persisted in URL hash
+  // is overkill; in-memory state is enough — drill-in is a transient view.
+  const [drillInto, setDrillInto] = useState(null);
+  const [drillShowPutaway, setDrillShowPutaway] = useState(true);
+  const [drillShowCategories, setDrillShowCategories] = useState(true);
+  const [drillShowHeatmap, setDrillShowHeatmap] = useState(false);
   const svgRef = useRef(null);
   const importRef = useRef(null);
   const historyRef = useRef([]);
@@ -2932,6 +2947,10 @@ export default function App() {
         }
       },
       { id: "duplicate", icon: "⎘", label: "Duplicate", hotkey: "Ctrl+D", run: () => duplicateItem(type, id) },
+      ...(type === "location" ? [
+        { divider: true },
+        { id: "drill",  icon: "⌖", label: "Open sub-locations →", run: () => setDrillInto(id) },
+      ] : []),
       { divider: true },
       { id: "front", icon: "⤒", label: "Bring to Front", hotkey: "Ctrl+]", run: () => zReorder("front") },
       { id: "fwd",   icon: "↑",  label: "Bring Forward", hotkey: "]",      run: () => zReorder("fwd")   },
@@ -2994,7 +3013,10 @@ export default function App() {
       if (e.key === ']' && cmd)  { e.preventDefault(); zReorder("front"); return; }
       if (e.key === '[' && cmd)  { e.preventDefault(); zReorder("back"); return; }
       // Esc clears selection
-      if (e.key === 'Escape') { setSel(null); setMultiSel(new Set()); setPutawayLoc(null); return; }
+      if (e.key === 'Escape') {
+        if (drillInto) { setDrillInto(null); return; }
+        setSel(null); setMultiSel(new Set()); setPutawayLoc(null); return;
+      }
       // Del/Backspace deletes selected
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
         e.preventDefault(); doDelete(sel.type, sel.id); return;
@@ -4199,6 +4221,57 @@ export default function App() {
 
         {/* SVG CANVAS */}
         <div style={{ flex: 1, marginLeft: 230, position: "relative" }}>
+          {/* DRILL-IN BREADCRUMB — visible only in drill-in mode. */}
+          {drillInto && (() => {
+            const pivot = data.nodes.find(n => n.id === drillInto);
+            if (!pivot) return null;
+            // Build path from root → pivot via location_id chain.
+            const path = [];
+            let cur = pivot, depth = 0;
+            while (cur && depth < 50) {
+              path.unshift(cur);
+              const pid = cur.data?.location_id;
+              cur = pid ? data.nodes.find(n => n.id === pid) : null;
+              depth++;
+            }
+            return (
+              <div style={{ position: "absolute", top: 8, left: 8, right: 8, zIndex: 30,
+                background: T.surface, border: `1px solid ${T.accent}55`, borderLeft: `3px solid ${T.accent}`,
+                borderRadius: 6, padding: "6px 10px", display: "flex", alignItems: "center", gap: 8,
+                fontSize: 11, color: T.text, fontFamily: "'IBM Plex Sans', sans-serif",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
+                <button onClick={() => setDrillInto(null)} title="Back to main canvas (Esc)"
+                  style={{ background: T.surfaceHover, border: `1px solid ${T.border}`, color: T.text,
+                    fontSize: 11, padding: "3px 8px", borderRadius: 4, fontFamily: "inherit", cursor: "pointer" }}>← back</button>
+                <span style={{ color: T.textDim }}>Sub-locations of</span>
+                {path.map((n, i) => (
+                  <React.Fragment key={n.id}>
+                    {i > 0 && <span style={{ color: T.textDim }}>›</span>}
+                    <button onClick={() => i === path.length - 1 ? null : setDrillInto(n.id)}
+                      style={{ background: i === path.length - 1 ? T.accentSoft : "transparent",
+                        color: i === path.length - 1 ? T.accent : T.text,
+                        border: "none", fontSize: 11, padding: "3px 6px", borderRadius: 3,
+                        fontFamily: "inherit", cursor: i === path.length - 1 ? "default" : "pointer" }}>
+                      {n.label}
+                    </button>
+                  </React.Fragment>
+                ))}
+                <span style={{ flex: 1 }} />
+                <label title="Show putaway-rule arrows in drill-in"
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: T.textDim, cursor: "pointer" }}>
+                  <input type="checkbox" checked={drillShowPutaway} onChange={e => setDrillShowPutaway(e.target.checked)} /> Putaway
+                </label>
+                <label title="Show storage-category color regions"
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: T.textDim, cursor: "pointer" }}>
+                  <input type="checkbox" checked={drillShowCategories} onChange={e => setDrillShowCategories(e.target.checked)} /> Categories
+                </label>
+                <label title="Show capacity heatmap (needs Odoo quants fetched)"
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: T.textDim, cursor: "pointer" }}>
+                  <input type="checkbox" checked={drillShowHeatmap} onChange={e => setDrillShowHeatmap(e.target.checked)} /> Heatmap
+                </label>
+              </div>
+            );
+          })()}
           <svg ref={svgRef} width="100%" height="100%" style={{ cursor: isPan ? "grabbing" : spaceDown ? "grab" : "default", background: T.bg, userSelect: "none", WebkitUserSelect: "none", MozUserSelect: "none" }}
             onMouseDown={onCanvasDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onWheel={onWheel}
             onContextMenu={e => {
@@ -4512,8 +4585,99 @@ export default function App() {
               });
             })()}
 
-            {/* ROUTE RULE EDGES */}
-            {(() => {
+            {/* DRILL-IN LAYERS — only render when drillInto is set. */}
+            {drillInto && (() => {
+              const layers = [];
+              const pivot = data.nodes.find(n => n.id === drillInto);
+              if (!pivot) return null;
+              // Direct children of the pivot (one level only — deeper levels render their own children below).
+              const directKids = data.nodes.filter(n =>
+                n.type === "location" && n.data?.location_id === drillInto
+              );
+
+              // (a) Storage-category color regions — wash behind each child node.
+              if (drillShowCategories) {
+                for (const k of directKids) {
+                  const cid = k.data?.storage_category_id;
+                  if (!cid) continue;
+                  const sx = k.x * scale + offset.x, sy = k.y * scale + offset.y;
+                  const sw = NW * scale, sh = NH * scale;
+                  layers.push(
+                    <rect key={`cat-wash-${k.id}`} x={sx - 14} y={sy - 14}
+                          width={sw + 28} height={sh + 28} rx={14} ry={14}
+                          fill={hashColor(cid, 50, 55)} fillOpacity={0.12}
+                          stroke="none" pointerEvents="none" />
+                  );
+                }
+              }
+
+              // (b) Capacity heatmap — tint child node backdrops by current/capacity.
+              if (drillShowHeatmap) {
+                const quants = data._quantsByLocation || {};
+                for (const k of directKids) {
+                  const cap = k.data?.capacity_qty || k.data?.capacity || 0;
+                  const cur = quants[k.id];
+                  let fill = "rgba(180,180,180,0.10)";   // unknown / no quants
+                  if (cap > 0 && cur !== undefined) {
+                    const ratio = cur / cap;
+                    if (ratio < 0.7) fill = "rgba(34, 197, 94, 0.18)";    // green
+                    else if (ratio < 0.95) fill = "rgba(251, 146, 60, 0.22)"; // amber
+                    else fill = "rgba(239, 68, 68, 0.25)";                // red
+                  }
+                  const sx = k.x * scale + offset.x, sy = k.y * scale + offset.y;
+                  const sw = NW * scale, sh = NH * scale;
+                  layers.push(
+                    <rect key={`heat-${k.id}`} x={sx - 6} y={sy - 6}
+                          width={sw + 12} height={sh + 12} rx={9} ry={9}
+                          fill={fill} stroke="none" pointerEvents="none" />
+                  );
+                }
+              }
+
+              // (c) Tree edges — faint dashed lines from pivot center to each child.
+              {
+                const px = (pivot.x + NW / 2) * scale + offset.x;
+                const py = (pivot.y + NH / 2) * scale + offset.y;
+                for (const k of directKids) {
+                  const kx = (k.x + NW / 2) * scale + offset.x;
+                  const ky = (k.y + NH / 2) * scale + offset.y;
+                  layers.push(
+                    <line key={`tree-${k.id}`} x1={px} y1={py} x2={kx} y2={ky}
+                          stroke={T.textDim} strokeWidth={1} strokeOpacity={0.35}
+                          strokeDasharray="3 3" pointerEvents="none" />
+                  );
+                }
+              }
+
+              // (d) Putaway-rule arrows — colored from pivot to matching child.
+              if (drillShowPutaway) {
+                const rules = (data.putawayRules || []).filter(r => r.location_in_id === drillInto);
+                for (const r of rules) {
+                  const target = r.location_out_id ? data.nodes.find(n => n.id === r.location_out_id) : null;
+                  if (!target) continue;
+                  const sx = (pivot.x + NW / 2) * scale + offset.x;
+                  const sy = (pivot.y + NH) * scale + offset.y;
+                  const dx = (target.x + NW / 2) * scale + offset.x;
+                  const dy = target.y * scale + offset.y;
+                  const hue = hashColor(r.id, 65, 50);
+                  layers.push(
+                    <g key={`pa-arrow-${r.id}`} pointerEvents="none">
+                      <line x1={sx} y1={sy} x2={dx} y2={dy} stroke={hue} strokeWidth={1.5} strokeOpacity={0.7} />
+                      <circle cx={dx} cy={dy} r={3} fill={hue} fillOpacity={0.8} />
+                      <text x={(sx + dx) / 2} y={(sy + dy) / 2 - 4} fontSize={9} fill={hue}
+                            textAnchor="middle" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {r.product || r.category || `seq ${r.sequence ?? '–'}`}
+                      </text>
+                    </g>
+                  );
+                }
+              }
+
+              return layers;
+            })()}
+
+            {/* ROUTE RULE EDGES — hidden in drill-in mode. */}
+            {!drillInto && (() => {
               const edgeOffsets = edgeOffsetMap;
               return data.routes.map(route => {
                 if (hidden.has(route.id)) return null;
@@ -4675,6 +4839,27 @@ export default function App() {
             {[...data.nodes].sort((a, b) => (a.z || 0) - (b.z || 0)).map(node => {
               if (hideUnused && node.type === "location" && !usedLocationIds.has(node.id)) return null;
               if (isDeactivated(node) && !showInactive) return null;
+              // Drill-in viewport filter: when drillInto is set, show only the
+              // pivot node + its descendants. Sub-locations (n.data.location_id set)
+              // are HIDDEN on the main canvas; they only render in drill-in.
+              if (drillInto) {
+                const isPivot = node.id === drillInto;
+                const isDesc = node.type === "location" && (() => {
+                  let cur = node, depth = 0;
+                  while (cur && depth < 50) {
+                    const pid = cur.data?.location_id;
+                    if (pid === drillInto) return true;
+                    if (!pid) return false;
+                    cur = data.nodes.find(n => n.id === pid);
+                    depth++;
+                  }
+                  return false;
+                })();
+                if (!isPivot && !isDesc) return null;
+              } else {
+                // Main canvas: hide all sub-locations (they only show in drill-in).
+                if (node.type === "location" && node.data?.location_id) return null;
+              }
               // Warehouses with children render as a blob+name-tag layer above; hide the small rect.
               if (node.type === "warehouse" && (warehouseChildren.get(node.id)?.locations.length || 0) > 0) return null;
               // View locations with children also render as a blob; hide the leaf rect.
@@ -4798,15 +4983,22 @@ export default function App() {
                   {/* TODO(brainstorm-needed): minimal storage-category surface added 2026-05-09.
                       Nested sub-location view, capacity-based putaway, and multi-level trees
                       are deferred pending a brainstorm pass with Brecht. See CLAUDE.md. */}
-                  {node.type === "location" && node.data?.usage === "internal" && (node.data?.capacity || node.data?.storage_category_id) && (
-                    <text x={sx + (NW / 2) * scale} y={sy + (NH + 11) * scale}
-                      fontSize={9 * Math.max(scale, 0.6)} fill={T.textDim} textAnchor="middle"
-                      fontFamily="'IBM Plex Mono', monospace" pointerEvents="none" style={{ userSelect: "none" }}>
-                      {node.data?.storage_category_id ? `${node.data.storage_category_id}` : ''}
-                      {node.data?.storage_category_id && node.data?.capacity ? ' · ' : ''}
-                      {node.data?.capacity ? `cap ${node.data.capacity}` : ''}
-                    </text>
-                  )}
+                  {node.type === "location" && node.data?.usage === "internal" && (node.data?.capacity_qty || node.data?.capacity_packages || node.data?.capacity || node.data?.storage_category_id) && (() => {
+                    const cid = node.data?.storage_category_id;
+                    const catName = cid ? ((data.storageCategories || []).find(c => c.id === cid)?.name || cid) : '';
+                    const capQty = node.data?.capacity_qty ?? node.data?.capacity ?? 0;
+                    const capPkg = node.data?.capacity_packages ?? 0;
+                    const capStr = [capQty ? `${capQty}u` : '', capPkg ? `${capPkg}p` : ''].filter(Boolean).join('+');
+                    return (
+                      <text x={sx + (NW / 2) * scale} y={sy + (NH + 11) * scale}
+                        fontSize={9 * Math.max(scale, 0.6)} fill={T.textDim} textAnchor="middle"
+                        fontFamily="'IBM Plex Mono', monospace" pointerEvents="none" style={{ userSelect: "none" }}>
+                        {catName}
+                        {catName && capStr ? ' · ' : ''}
+                        {capStr ? `cap ${capStr}` : ''}
+                      </text>
+                    );
+                  })()}
                 </g>
               );
             })}
