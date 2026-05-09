@@ -390,6 +390,34 @@ references. Field is exposed in the PropPanel too (`pinned` boolean).
 The combined visibility set is `visibleSubLocs` = (inline-expanded
 parents' children) ∪ (rule-connected) ∪ (pinned).
 
+#### ✅ Putaway view (separate window — option C)
+
+Toolbar button `▦ putaway` switches the active canvas to a putaway-centric view. Press again to flip back to flow. State is `viewMode: 'flow' | 'putaway'`, persisted in localStorage.
+
+What changes when in putaway view:
+
+- **Canvas**: route/rule edges, op-type pills/wash, op-types — all hidden. Locations render as plain rectangles (top-level always, sub-locations only if referenced by a `location_in_id` or `location_out_id`). Putaway rules render as quadratic curves between input → output. Edge color encodes `storage_strategy` (closest=sky, least_packages=amber, manual=grey-dashed). Edge thickness scales with `sequence` priority — lower sequence = thicker. Storage-category badges sit inside each tagged location.
+- **Left sidebar**: storage categories list (capacity + rule count per category). Click a category to filter the canvas; click again or the "Clear filter" button to remove. Strategy / sequence legend at the bottom.
+- **Right sidebar (PropPanel)**: works the same as flow view, now reachable for putaway rules — clicking an edge selects the rule, PropPanel surfaces all fields. Fixed a longstanding bug where `doUpdate('putaway_rule', …)` mistakenly mapped over `data.nodes` instead of `data.putawayRules`, so edits silently no-op'd; now writes to the right collection.
+- **Camera + selection**: shared with flow view for now (deliberately simple). Per-view camera state is a polish item; see roadmap.
+
+The simple-user putaway surfaces are **untouched**: the PutawayPanel inside sub-loc drill-in still works in flow view, and the putaway fields in PropPanel are unchanged. The new view is the power-user surface for warehouses where putaway dominates (DRBB-class: 9,865 putaway rules vs 605 stock rules).
+
+Open follow-ups (deferred):
+- Per-view camera state (don't share scale + offset between views).
+- Capacity utilisation overlay (fill bar inside each location, sourced from `_quantsByLocation`).
+- Drag-to-create putaway rule from one location to another inside putaway view.
+- Hierarchical render: sub-locations nested visually rather than placed by their parent's coords.
+
+#### ✅ Sidebar show/hide toggles + horizontal-scroll toolbar
+
+For narrow / split-screen viewports where the toolbar got cut off and the right sidebar overlapped the canvas:
+
+- Two toggles at the very-left of the toolbar (so they stay visible if the toolbar overflows): hide/show left sidebar (Routes & Rules / Storage Categories) and hide/show right sidebar (PropPanel). Both persisted in localStorage.
+- Toolbar gets `overflowX: auto` so it can be horizontally scrolled when items don't fit, instead of clipping at the right edge.
+- Left sidebar uses `display: none` when hidden; canvas `marginLeft` tracks the toggle so the canvas reclaims the full width.
+- PropPanel render is gated on `rightSidebarVisible` so the user can dismiss it without losing selection.
+
 #### ✅ Pan UX — Ctrl+drag and Ctrl/Shift+wheel
 
 - **Ctrl+drag (anywhere)** — primary pan binding, works over nodes too.
@@ -510,12 +538,13 @@ where:
 | Sidebar (right) | Rule PropPanel | Putaway rule PropPanel |
 | Drill-in | Sub-locations | Sub-locations + which putaway rule resolves there |
 
-**Decision (2026-05-09 evening): Option A — toolbar mode toggle.** Other approaches recorded for posterity but not on the roadmap.
+**Decision (2026-05-09 evening): Option C — separate full-screen view.** Reverted from the earlier "Option A toggle" decision after Brecht clarified the intent: putaway should be a **separate window** that swaps in for the main canvas, focused on categories + putaway as first-class entities, not a re-skin of the same canvas. The toolbar gets a button that switches the active view; pressing it again returns to the flow view. Both views share the same `data` object — separate state for camera / selection / filters per view. **The existing putaway surfaces stay** (PutawayPanel inside sub-loc drill-in, putaway fields in PropPanel) — they're the "simple user" path; the dedicated view is the power-user surface for warehouses where putaway dominates.
 
 | # | Approach | Description |
 |---|---|---|
-| **A** ✅ | **Mode toggle on the toolbar** — `[Routes/Rules] [Putaway]` segmented control. Same canvas, rebound. | Cheapest. One canvas, two interpretations of the same data. |
+| A | **Mode toggle on the toolbar (rebind same canvas)** — segmented control re-interprets the current canvas. | Cheapest, but conflates two mental models on one drawing. Reverted. |
 | B | **Split-screen / tabbed** — top half routes/rules, bottom half putaway, synchronised pan. | Comparison-friendly but tight on screen real estate. |
+| **C** ✅ | **Separate full-screen view** — toolbar button swaps the canvas for a putaway-centric one (own camera, own selection, own sidebars). | Cleanest mental model — each view is a *single* concept rendered well. Most code, but the existing simple-user surfaces stay untouched. |
 | C | **Separate route under `/putaway` URL** — full-page dedicated view with its own state. | Cleanest mental model, most work — needs its own command palette, viewport state, etc. |
 
 Implementation sketch for **A**:

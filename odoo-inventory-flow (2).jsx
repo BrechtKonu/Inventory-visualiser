@@ -2766,6 +2766,18 @@ export default function App() {
   });
   useEffect(() => { try { localStorage.setItem('leftSidebarVisible', leftSidebarVisible ? '1' : '0'); } catch (_) {} }, [leftSidebarVisible]);
   useEffect(() => { try { localStorage.setItem('rightSidebarVisible', rightSidebarVisible ? '1' : '0'); } catch (_) {} }, [rightSidebarVisible]);
+  // Top-level view mode — 'flow' (default: routes / stock.rule) or 'putaway'
+  // (storage categories + stock.putaway.rule as primary entities). Each view
+  // has its own conceptual canvas; selection + camera are shared for now,
+  // separate per-view camera is a polish item.
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('viewMode') === 'putaway' ? 'putaway' : 'flow'; }
+    catch (_) { return 'flow'; }
+  });
+  useEffect(() => { try { localStorage.setItem('viewMode', viewMode); } catch (_) {} }, [viewMode]);
+  // Storage-category filter: when set in putaway view, dim everything
+  // except locations + rules tagged with this category.
+  const [putawayCategoryFilter, setPutawayCategoryFilter] = useState(null);
   syncTheme(isDark); // keep T & nodeStyles in sync before every render
   const [data, setData] = useState(initData);
   const [scale, setScale] = useState(0.72);
@@ -3420,6 +3432,9 @@ export default function App() {
         const rl = r.rules.find(x => x.id === id);
         if (rl) { setSel({ type: "rule", id, item: rl }); return d; }
       }
+      // Putaway rules — primary selection target in the putaway view.
+      const pa = (d.putawayRules || []).find(x => x.id === id);
+      if (pa) { setSel({ type: "putaway_rule", id, item: pa }); return d; }
       return d;
     });
   }, []);
@@ -3431,9 +3446,13 @@ export default function App() {
       setCanUndo(true);
       setCanRedo(false);
       const n = { ...p };
-      if (["warehouse", "location", "putaway_rule"].includes(type)) {
+      if (["warehouse", "location"].includes(type)) {
         n.nodes = p.nodes.map(x => x.id === id ? { ...x, ...upd } : x);
         const u = n.nodes.find(x => x.id === id);
+        if (u) setSel(s => s?.id === id ? { ...s, item: u } : s);
+      } else if (type === "putaway_rule") {
+        n.putawayRules = (p.putawayRules || []).map(x => x.id === id ? { ...x, ...upd } : x);
+        const u = n.putawayRules.find(x => x.id === id);
         if (u) setSel(s => s?.id === id ? { ...s, item: u } : s);
       } else if (type === "operation_type") {
         n.operationTypes = p.operationTypes.map(x => x.id === id ? { ...x, ...upd } : x);
@@ -4799,6 +4818,17 @@ export default function App() {
               fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer", lineHeight: 1 }}>
             {rightSidebarVisible ? "│▶" : "◀│"}
           </button>
+          {/* View-mode switch — flow (routes / stock.rule) vs putaway
+              (storage categories / stock.putaway.rule). Separate canvas
+              per view; the simple-user putaway surfaces (sub-loc drill-in
+              PutawayPanel + putaway fields in PropPanel) stay in flow view. */}
+          <button onClick={() => { setViewMode(m => m === 'flow' ? 'putaway' : 'flow'); setSel(null); }}
+            title={viewMode === 'flow' ? "Switch to Putaway view (storage categories + putaway rules)" : "Switch to Flow view (routes + stock rules)"}
+            style={{ background: viewMode === 'putaway' ? T.accentSoft : "transparent", border: `1px solid ${viewMode === 'putaway' ? T.accent : T.border}`,
+              color: viewMode === 'putaway' ? T.accent : T.textDim, fontSize: 10, padding: "2px 7px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer", lineHeight: 1, fontWeight: 600 }}>
+            {viewMode === 'flow' ? "≡ flow" : "▦ putaway"}
+          </button>
           <div style={{ width: 22, height: 22, borderRadius: 4, background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>⌂</div>
           {!compact && <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>Odoo Inventory Flow</span>}
           <span title={compact ? `${data.nodes.length} nodes · ${data.operationTypes.length} ops · ${data.routes.length} routes · ${data.routes.reduce((a, r) => a + r.rules.length, 0)} rules` : undefined}
@@ -5000,8 +5030,53 @@ export default function App() {
       )}
 
       <div style={{ flex: 1, position: "relative", display: "flex" }}>
-        {/* ROUTE SIDEBAR */}
+        {/* LEFT SIDEBAR — Routes & Rules in flow view, Storage Categories
+            in putaway view. Same outer container; content swaps on viewMode. */}
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 230, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: leftSidebarVisible ? "flex" : "none", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
+          {viewMode === 'putaway' && (
+            <>
+              <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: 7 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Storage Categories</span>
+                <span style={{ fontSize: 9, color: T.textDim }}>Click to filter the canvas</span>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
+                {(data.storageCategories || []).length === 0 && (
+                  <div style={{ padding: "12px 14px", fontSize: 9, color: T.textDim }}>No storage categories defined.</div>
+                )}
+                {(data.storageCategories || []).map(cat => {
+                  const isActive = putawayCategoryFilter === cat.id;
+                  const ruleCount = (data.putawayRules || []).filter(r => r.storage_category_id === cat.id).length;
+                  return (
+                    <div key={cat.id}
+                         onClick={() => setPutawayCategoryFilter(isActive ? null : cat.id)}
+                         style={{ padding: "6px 12px", cursor: "pointer",
+                                  background: isActive ? T.accentSoft : "transparent",
+                                  borderLeft: isActive ? `3px solid ${T.accent}` : `3px solid transparent` }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: isActive ? T.accent : T.text }}>▦ {cat.name}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>
+                        cap: {cat.capacity_qty || '—'} · {ruleCount} rule{ruleCount === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                  );
+                })}
+                {putawayCategoryFilter && (
+                  <div style={{ padding: "8px 12px", marginTop: 4 }}>
+                    <button onClick={() => setPutawayCategoryFilter(null)}
+                            style={{ width: "100%", padding: "5px 8px", background: "transparent", border: `1px dashed ${T.border}`, color: T.textDim, fontSize: 9, borderRadius: 4, cursor: "pointer", fontFamily: "inherit" }}>
+                      Clear filter
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.5 }}>
+                <div>● solid = closest_location</div>
+                <div>● solid = least_packages</div>
+                <div>● dashed = manual_no_strategy</div>
+                <div style={{ marginTop: 4, color: T.textSoft }}>thicker = lower sequence (priority)</div>
+              </div>
+            </>
+          )}
+          {viewMode === 'flow' && <>
           <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Routes & Rules</span>
             <input
@@ -5104,6 +5179,7 @@ export default function App() {
               <span style={{ fontSize: 9, fontWeight: 600, color: T.sky }}>New Route</span>
             </button>
           </div>
+          </>}{/* end of viewMode === 'flow' sidebar content */}
         </div>
 
         {/* SVG CANVAS — marginLeft tracks left sidebar visibility so the
@@ -5226,6 +5302,114 @@ export default function App() {
               ))}
             </defs>
             <rect data-bg="true" width="100%" height="100%" fill="url(#dots)" />
+
+            {viewMode === 'putaway' && (() => {
+              // ── PUTAWAY VIEW ─────────────────────────────────────────────
+              // Storage categories + putaway rules as primary entities. Locations
+              // are kept (top-level + any sub-loc that's referenced by a putaway
+              // rule's location_in_id or location_out_id). Edges are stock.putaway
+              // rules drawn from input → output. Edge color encodes storage_strategy.
+              // Storage category badges sit inside each location that references one.
+              //
+              // The simple-user putaway surfaces (PutawayPanel inside sub-loc
+              // drill-in + putaway fields in PropPanel) are unaffected by this view.
+              const STRATEGY_COLOR = {
+                manual_no_strategy: '#94a3b8',
+                closest_location: T.sky,
+                least_packages: T.amber,
+              };
+              const usedLocs = new Set();
+              for (const r of (data.putawayRules || [])) {
+                if (r.location_in_id) usedLocs.add(r.location_in_id);
+                if (r.location_out_id) usedLocs.add(r.location_out_id);
+              }
+              const visible = data.nodes.filter(n => {
+                if (n.type !== 'location') return false;
+                if (!passesCompanyFilter(n)) return false;
+                // Top-level locations always show (gives spatial reference).
+                if (!n.data?.location_id) return true;
+                // Sub-locations only if used by a putaway rule.
+                return usedLocs.has(n.id);
+              });
+              const cats = data.storageCategories || [];
+              const catFilter = putawayCategoryFilter;
+              return (
+                <>
+                  {/* Putaway rule edges — straight quadratic curves between
+                      location_in and location_out_id. Skip rules whose
+                      location_out_id is missing (legacy string-only rules). */}
+                  {(data.putawayRules || []).map(rule => {
+                    if (!rule.location_in_id || !rule.location_out_id) return null;
+                    const sn = nodeById.get(rule.location_in_id);
+                    const dn = nodeById.get(rule.location_out_id);
+                    if (!sn || !dn) return null;
+                    const dim = catFilter && rule.storage_category_id !== catFilter;
+                    const stroke = STRATEGY_COLOR[rule.storage_strategy] || '#64748b';
+                    const sx = (sn.x + NW / 2) * scale + offset.x;
+                    const sy = (sn.y + NH / 2) * scale + offset.y;
+                    const dx = (dn.x + NW / 2) * scale + offset.x;
+                    const dy = (dn.y + NH / 2) * scale + offset.y;
+                    const mx = (sx + dx) / 2, my = (sy + dy) / 2 - 30 * scale;
+                    const d = `M ${sx} ${sy} Q ${mx} ${my} ${dx} ${dy}`;
+                    const isSel = sel?.id === rule.id;
+                    const seqWeight = Math.max(0.5, Math.min(2, 1 + (50 - (rule.sequence || 50)) / 100));
+                    return (
+                      <g key={rule.id} opacity={dim ? 0.15 : 1}
+                         onClick={e => { e.stopPropagation(); doSelect(rule.id); }}
+                         style={{ cursor: 'pointer' }}>
+                        <title>{`${rule.location_in_id} → ${rule.location_out_id}\nstrategy: ${rule.storage_strategy || '—'}\nseq: ${rule.sequence ?? '—'}\n${rule.product ? 'product: ' + rule.product : ''}${rule.category ? '\ncategory: ' + rule.category : ''}`}</title>
+                        <path d={d} fill="none" stroke="transparent" strokeWidth={14} pointerEvents="stroke" />
+                        <path d={d} fill="none" stroke={stroke}
+                              strokeWidth={(isSel ? 3 : 1.6) * seqWeight}
+                              strokeOpacity={isSel ? 1 : 0.7}
+                              strokeDasharray={rule.storage_strategy === 'manual_no_strategy' ? '4 3' : undefined} />
+                      </g>
+                    );
+                  })}
+                  {/* Locations as plain rectangles — same NW×NH as flow view
+                      so the spatial layout stays familiar. Storage-category
+                      badge inside each location that has one. */}
+                  {visible.map(node => {
+                    const sx = node.x * scale + offset.x;
+                    const sy = node.y * scale + offset.y;
+                    const isSel = sel?.id === node.id;
+                    const cat = cats.find(c => c.id === node.data?.storage_category_id);
+                    const dim = catFilter && cat?.id !== catFilter;
+                    const isSub = !!node.data?.location_id;
+                    return (
+                      <g key={node.id} opacity={dim ? 0.25 : 1}
+                         onClick={e => { e.stopPropagation(); doSelect(node.id); }}
+                         onContextMenu={e => openCtxMenu(node.type, node.id, e)}
+                         style={{ cursor: 'pointer' }}>
+                        <title>{node.label}{cat ? `\nstorage: ${cat.name}` : ''}</title>
+                        <rect x={sx} y={sy} width={NW * scale} height={NH * scale} rx={9 * scale}
+                              fill={T.surface}
+                              stroke={isSel ? T.text : (cat ? T.accent : T.border)}
+                              strokeWidth={isSel ? 2 : 1}
+                              strokeDasharray={isSub ? `${4 * scale} ${3 * scale}` : undefined} />
+                        <foreignObject x={sx + 6 * scale} y={sy + 4 * scale}
+                                       width={(NW - 12) * scale} height={(NH - 8) * scale}>
+                          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', pointerEvents: 'none', fontFamily: "'IBM Plex Sans', sans-serif" }}>
+                            <div style={{ fontSize: 12 * Math.max(scale, 0.7), fontWeight: 600, color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {node.label}
+                            </div>
+                            {cat && (
+                              <div style={{ fontSize: 9 * Math.max(scale, 0.7), color: T.accent, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>
+                                ▦ {cat.name}{cat.capacity_qty ? ` · ${cat.capacity_qty}` : ''}
+                              </div>
+                            )}
+                            {!cat && isSub && (
+                              <div style={{ fontSize: 9 * Math.max(scale, 0.7), color: T.textDim, fontFamily: "'IBM Plex Mono', monospace", marginTop: 2 }}>sub-location</div>
+                            )}
+                          </div>
+                        </foreignObject>
+                      </g>
+                    );
+                  })}
+                </>
+              );
+            })()}
+            {viewMode === 'flow' && <>
 
             {/* WAREHOUSE BLOBS — large dashed boundary around each warehouse's locations */}
             {data.nodes.filter(n => n.type === "warehouse").map(wh => {
@@ -6169,6 +6353,8 @@ export default function App() {
                 </g>
               );
             })()}
+
+            </>}{/* end of viewMode === 'flow' */}
 
             {/* SNAP GUIDES */}
             {snapGuides.map((g, i) => g.orient === "v"
