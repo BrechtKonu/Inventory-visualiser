@@ -428,6 +428,34 @@ Auth: API key in `apiCfg` extended with an LLM provider section. Privacy: never 
 
 Effort estimate: a small slice (one of the 6 above) is ~1 day. Full integration is a multi-week thread. **Brainstorm before coding** — too many design choices to default sensibly.
 
+### Reference scale benchmark — DRBB (Dreambaby)
+
+The canonical "huge warehouse" customer used to size the visualiser. Real Odoo
+export numbers (from the project handover doc):
+
+| Metric | Count |
+|---|---|
+| Companies | 36 (1 main + 35 branches) |
+| Warehouses | 38 |
+| Locations | 23,053 |
+| Operation types | 412 |
+| Routes | 85 |
+| Stock rules | 605 |
+| Putaway rules | 9,865 |
+| Storage categories | 16 |
+| Largest single zone | 3,528 locations (DC/Stock/Circuit/11M) |
+| Reception steps mix | older shops 2-step, newer shops 1-step |
+
+Key shape observations that drove design:
+
+- **Hierarchical naming** — `A-M-K-101-0` (region-section-corridor-column-level). Sub-locations are deeply nested; the drill-in view scales to this naturally.
+- **Circuit vs Reserve split by level** — levels 0-3 are circuit (picking), 4-6 are reserve (pallet). Same physical column splits via `removal_priority`.
+- **Storage categories drive bin geometry** — 16 categories like `CIRCUIT P8` (1.97 m³ pallet), `CIRCUIT S2` (0.104 m³ shelf bin). Category capacity is BY VOLUME, not just qty — a custom field `max_volume` on `stock.storage.category` per the project's `drbb_inventory` module.
+- **Putaway rules are mostly category-based** — 9,826 of 9,865 rules (99.6%) match by product category, not specific product. Per-category rule sets average ~6 rules each (1,125 categories × 6).
+- **Multi-company is per-shop branch** — DC + XXL + 35 shop branches all in one Odoo instance; routes/rules/locations carry `company_id` so company-filter is essential.
+
+Every commit touching scale-sensitive code should ask: "does this still work at 23k locations?" The cluster mode + virtualised render shipped in `aa6fad9` are sized for this.
+
 #### 🟨 UI/UX for huge warehouses (partial — quick wins shipped)
 
 Built incrementally as features land. Quick wins shipped in commit `30302de`:
@@ -452,6 +480,41 @@ Built incrementally as features land. Quick wins shipped in commit `30302de`:
 - **JSON export size budget** — measure for 1k-node export. Likely fine but worth pinning a number. Add streaming download if it grows >5MB.
 
 Total remaining estimate: **~5-6 days** for the full pending list. Recommend doing virtualised rendering and cluster mode together as one commit (~2 days) — they're the load-bearing improvements. Other items are incremental.
+
+#### 🟦 PutawayPanel collapsed-by-default (DRBB-driven)
+
+DRBB has 9,865 putaway rules. The current PutawayPanel renders all rules of a location as one flat list when that location is selected. At 100+ rules per location it becomes a wall. Proposed:
+
+- Collapse-by-default per location, with a header showing rule count.
+- Sort by `sequence` ascending.
+- Inline filter at top: "filter by product/category/storage_category…".
+- Pagination at >50 rules per location: render first 30, "show all" link.
+- Bulk operations: "select all", "shift sequence by N", "set storage strategy on selected".
+
+Effort: ~half day. Cross-cutting with the per-product capacity ui already shipped.
+
+#### 🟦 Per-warehouse drill-in scope (multi-warehouse comprehension)
+
+DRBB has 38 warehouses on one canvas. Even with virtualisation, comprehension benefits from "scope to one warehouse at a time". Proposed:
+
+- Right-click a warehouse → "Open warehouse →" (parallel to "Open sub-locations →" on locations).
+- Drill-in shows ONLY entities tagged `__autoGen.warehouseId === <id>` OR linked by route_id whose `warehouse_selectable=True` AND has this warehouse on `data.warehouse_ids` OR via per-entity `data.warehouse_id`.
+- Breadcrumb: "Main / Warehouse: DB Brugge".
+- Combines with company filter — drill-in respects current company selection.
+- Esc returns to main canvas.
+
+Effort: ~1 day. Strongly complementary to multi-company filter.
+
+#### 🟦 max_volume on storage categories (DRBB-specific custom field)
+
+DRBB customised `stock.storage.category` with a `max_volume` field (m³) and overrode `_check_can_be_used()` on `stock.location` to validate that incoming goods fit. Currently the visualiser only models `max_weight` and `capacity_qty`. Proposed:
+
+- Add `max_volume: number` field on storage category data.
+- StorageCategoryModal table grows a Max volume column.
+- Putaway simulator: if product has a `volume` attribute (input ctx) and the resolved location's category has `max_volume`, check it.
+- Mark this as customer-specific in code — many Odoo installs don't have it.
+
+Effort: ~half day.
 
 #### 🟦 Auto-migration: path-string putaway rules → real sub-location nodes
 

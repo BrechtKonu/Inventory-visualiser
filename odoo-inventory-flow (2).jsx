@@ -1913,15 +1913,15 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
   // 3. Fetch all models (locations and rules paged; others are bounded)
   onProgress("Fetching warehouses, routes & operations…");
   const [warehouses, pickingTypes, routes, putaway] = await Promise.all([
-    sr("stock.warehouse", [], ["name","code","reception_steps","delivery_steps","buy_to_resupply","manufacture_to_resupply"]),
-    sr("stock.picking.type", [["active","=",true]], ["name","code","sequence_code","default_location_src_id","default_location_dest_id","create_backorder","reservation_method","use_create_lots","use_existing_lots","show_reserved"]),
-    sr("stock.route", [["active","=",true]], ["name","active","product_selectable","product_categ_selectable","warehouse_selectable","sale_selectable","rule_ids"]),
-    sr("stock.putaway.rule", [], ["product_id","category_id","location_in_id","location_out_id","sequence","storage_category_id","storage_strategy"]),
+    sr("stock.warehouse", [], ["name","code","reception_steps","delivery_steps","buy_to_resupply","manufacture_to_resupply","company_id"]),
+    sr("stock.picking.type", [["active","=",true]], ["name","code","sequence_code","default_location_src_id","default_location_dest_id","create_backorder","reservation_method","use_create_lots","use_existing_lots","show_reserved","company_id","warehouse_id"]),
+    sr("stock.route", [["active","=",true]], ["name","active","product_selectable","product_categ_selectable","warehouse_selectable","sale_selectable","rule_ids","company_id"]),
+    sr("stock.putaway.rule", [], ["product_id","category_id","location_in_id","location_out_id","sequence","storage_category_id","storage_strategy","company_id"]),
   ]);
   onProgress("Fetching locations…");
-  const locations = await fetchAll("stock.location", [["usage","!=","view"],["active","=",true]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location","storage_category_id"], 500, n => onProgress(`Fetching locations… (${n})`));
+  const locations = await fetchAll("stock.location", [["usage","!=","view"],["active","=",true]], ["complete_name","usage","removal_strategy_id","barcode","scrap_location","replenish_location","storage_category_id","location_id","company_id"], 500, n => onProgress(`Fetching locations… (${n})`));
   onProgress("Fetching rules…");
-  const rules = await fetchAll("stock.rule", [["active","=",true]], ["name","action","procure_method","location_src_id","location_dest_id","picking_type_id","auto","delay","propagate_cancel","route_id"], 500, n => onProgress(`Fetching rules… (${n})`));
+  const rules = await fetchAll("stock.rule", [["active","=",true]], ["name","action","procure_method","location_src_id","location_dest_id","picking_type_id","auto","delay","propagate_cancel","route_id","company_id"], 500, n => onProgress(`Fetching rules… (${n})`));
 
   // 4. ID → app-id lookup maps
   const rid = (field) => Array.isArray(field) ? field[0] : field; // unwrap many2one [id, name]
@@ -1948,12 +1948,18 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
 
   // 5. Build nodes — positions assigned by autoLayout after import
   const COL_W = 260, ROW_H = 100, PAD = 60;
+  // Helper to map a raw Odoo company_id m2o → app `comp-<id>` slug, or '' if unset.
+  const mapCompany = (raw) => {
+    const r = rid(raw);
+    return r ? `comp-${r}` : "";
+  };
   const warehouseNodes = warehouses.map((wh, i) => ({
     id: `wh-${wh.id}`, type: "warehouse",
     label: wh.name, x: PAD + i * COL_W, y: 10,
     data: { code: wh.code, name: wh.name, reception_steps: wh.reception_steps || "one_step",
             delivery_steps: wh.delivery_steps || "one_step",
-            buy_to_resupply: !!wh.buy_to_resupply, manufacture_to_resupply: !!wh.manufacture_to_resupply },
+            buy_to_resupply: !!wh.buy_to_resupply, manufacture_to_resupply: !!wh.manufacture_to_resupply,
+            company_id: mapCompany(wh.company_id) },
   }));
   const locationNodes = locations.map((loc, i) => ({
     id: `loc-${loc.id}`, type: "location",
@@ -1963,7 +1969,9 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
             removal_strategy: rname(loc.removal_strategy_id) || "fifo", barcode: loc.barcode || "",
             scrap_location: !!loc.scrap_location,
             replenish_location: !!loc.replenish_location,
-            storage_category_id: rname(loc.storage_category_id) || "" },
+            storage_category_id: rname(loc.storage_category_id) || "",
+            location_id: rid(loc.location_id) ? `loc-${rid(loc.location_id)}` : "",
+            company_id: mapCompany(loc.company_id) },
   }));
 
   // 6. Operation types
@@ -1978,7 +1986,8 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
               create_backorder: pt.create_backorder || "ask",
               reservation_method: pt.reservation_method || "at_confirm",
               use_create_lots: !!pt.use_create_lots, use_existing_lots: !!pt.use_existing_lots,
-              show_reserved: !!pt.show_reserved },
+              show_reserved: !!pt.show_reserved,
+              company_id: mapCompany(pt.company_id) },
     }));
 
   // 7. Routes + nested rules
@@ -1993,7 +2002,8 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     colorIdx: i % ROUTE_COLORS.length,
     data: { name: route.name, active: route.active,
             product_selectable: !!route.product_selectable, product_categ_selectable: !!route.product_categ_selectable,
-            warehouse_selectable: !!route.warehouse_selectable, sale_selectable: !!route.sale_selectable },
+            warehouse_selectable: !!route.warehouse_selectable, sale_selectable: !!route.sale_selectable,
+            company_id: mapCompany(route.company_id) },
     rules: (rulesByRoute.get(route.id) || []).map(rule => ({
       id: `rl-${rule.id}`, label: rule.name,
       action: rule.action, procure_method: rule.procure_method,
@@ -2002,7 +2012,8 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
       picking_type_id:  opMap.get(rid(rule.picking_type_id))   || "",
       auto: rule.auto || "manual",
       data: { name: rule.name, action: rule.action, procure_method: rule.procure_method,
-              auto: rule.auto || "manual", propagate_cancel: !!rule.propagate_cancel, delay: rule.delay || 0 },
+              auto: rule.auto || "manual", propagate_cancel: !!rule.propagate_cancel, delay: rule.delay || 0,
+              company_id: mapCompany(rule.company_id) },
     })),
   }));
 
@@ -2049,6 +2060,7 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     sequence: p.sequence ?? 99,
     storage_strategy: p.storage_strategy || "manual_no_strategy",
     storage_category_id: catMap.get(rid(p.storage_category_id)) || rname(p.storage_category_id) || "",
+    company_id: mapCompany(p.company_id),
   }));
 
   // 10. Quants — aggregate per location for the heatmap. Best-effort, fetches on every
@@ -2659,6 +2671,27 @@ export default function App() {
   // Multi-company filter: when non-null, render only entities whose company_id
   // is in the set. null = "All companies" (show everything regardless of tag).
   const [selectedCompanies, setSelectedCompanies] = useState(null);
+  // Perf overlay toggle (off by default; useful at 500+ nodes for diagnostics).
+  const [showPerf, setShowPerf] = useState(false);
+  // FPS tracker — only updates when overlay is on, to avoid wasteful state churn.
+  const [fps, setFps] = useState(0);
+  useEffect(() => {
+    if (!showPerf) return;
+    let raf, last = performance.now(), frames = 0;
+    const tick = (t) => {
+      frames++;
+      if (t - last >= 1000) {
+        setFps(Math.round((frames * 1000) / (t - last)));
+        last = t; frames = 0;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [showPerf]);
+  // Filter mode: when a route is selected, hide non-related entities entirely
+  // instead of just dimming. Off = dim (current behaviour); On = hard-hide.
+  const [hardFilter, setHardFilter] = useState(false);
   // Helper: does an entity pass the company filter?
   const passesCompanyFilter = useCallback((e) => {
     if (!selectedCompanies) return true;
@@ -2729,6 +2762,67 @@ export default function App() {
     for (const n of data.nodes) m.set(n.id, n);
     return m;
   }, [data.nodes]);
+
+  // World-coord viewport rect — updated reactively on scale/offset changes.
+  // Used to virtualise node + edge rendering on large canvases. The first
+  // ref is cleared on each render so we always read the live SVG size.
+  const [viewportSize, setViewportSize] = useState({ w: 1200, h: 800 });
+  useEffect(() => {
+    const update = () => {
+      if (!svgRef.current) return;
+      const r = svgRef.current.getBoundingClientRect();
+      setViewportSize({ w: r.width, h: r.height });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  const viewportWorld = useMemo(() => {
+    const sx = (-offset.x) / scale;
+    const sy = (-offset.y) / scale;
+    return {
+      x0: sx, y0: sy,
+      x1: sx + viewportSize.w / scale,
+      y1: sy + viewportSize.h / scale,
+    };
+  }, [offset, scale, viewportSize]);
+  // Virtualisation kicks in when total node count >= this threshold; below it
+  // we render everything (matches the small-warehouse behaviour you'd expect).
+  const VIRT_THRESHOLD = 80;
+  const virtualiseRender = data.nodes.length >= VIRT_THRESHOLD;
+  // Cluster mode: when zoomed out below this scale on a dense canvas, group
+  // nearby nodes into a single bubble per grid bin instead of rendering each.
+  const CLUSTER_SCALE_THRESHOLD = 0.32;
+  const CLUSTER_GRID_PX = 220;        // world-coord cell size
+  const clusterMode = virtualiseRender && scale < CLUSTER_SCALE_THRESHOLD;
+  const isInViewport = useCallback((node) => {
+    if (!virtualiseRender) return true;
+    const PAD = NW;  // soft margin so partial-edge nodes still render
+    const x0 = node.x - PAD, y0 = node.y - PAD;
+    const x1 = node.x + NW + PAD, y1 = node.y + NH + PAD;
+    return !(x1 < viewportWorld.x0 || x0 > viewportWorld.x1 ||
+             y1 < viewportWorld.y0 || y0 > viewportWorld.y1);
+  }, [virtualiseRender, viewportWorld]);
+  // childCountByParent: how many sub-locations each parent has. Used for the
+  // "+N" badge on the main canvas, signalling that drill-in has more detail.
+  const childCountByParent = useMemo(() => {
+    const m = new Map();
+    for (const n of data.nodes) {
+      const pid = n.data?.location_id;
+      if (pid) m.set(pid, (m.get(pid) || 0) + 1);
+    }
+    return m;
+  }, [data.nodes]);
+
+  const isEdgeInViewport = useCallback((src, dst) => {
+    if (!virtualiseRender) return true;
+    const x0 = Math.min(src.x, dst.x) - NW;
+    const y0 = Math.min(src.y, dst.y) - NH;
+    const x1 = Math.max(src.x + NW, dst.x + NW) + NW;
+    const y1 = Math.max(src.y + NH, dst.y + NH) + NH;
+    return !(x1 < viewportWorld.x0 || x0 > viewportWorld.x1 ||
+             y1 < viewportWorld.y0 || y0 > viewportWorld.y1);
+  }, [virtualiseRender, viewportWorld]);
 
   const usedLocationIds = useMemo(() => {
     const s = new Set();
@@ -3465,7 +3559,13 @@ export default function App() {
       const ROW_H = 100;          // vertical row spacing within a tier
       const DIAG_DROP = 55;       // vertical drift per tier (guarantees diagonal flow)
       const PAD_X = 80;             // canvas-edge padding (Y baseline comes from Y_CENTER below)
-      const BC_ITER = 12;         // barycenter passes (Sugiyama crossing reduction)
+      // Barycenter passes (Sugiyama crossing reduction). Each pass is O(N log N)
+      // per tier and dominates auto-layout cost at high N. Adaptive cap:
+      //   <200 nodes → full quality (12 passes)
+      //   200–500    → 6 passes (still very good ordering, ~half the time)
+      //   >500       → 3 passes (acceptable; user can re-run if needed)
+      const _nN = p.nodes.filter(n => n.type === "location").length;
+      const BC_ITER = _nN > 500 ? 3 : _nN > 200 ? 6 : 12;
 
       // ── Visibility filter ────────────────────────────────────────────────
       const usedIds = new Set();
@@ -4420,6 +4520,16 @@ export default function App() {
                 style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>
             {data.nodes.length}n · {data.operationTypes.length}op · {data.routes.length}r · {data.routes.reduce((a, r) => a + r.rules.length, 0)}rl
           </span>
+          <button onClick={() => setShowPerf(s => !s)}
+            title="Toggle performance overlay (FPS, virt status, render counts)"
+            style={{ background: showPerf ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
+              color: showPerf ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>perf</button>
+          <button onClick={() => setHardFilter(s => !s)}
+            title="Hard filter: when a route/rule is selected, HIDE non-related nodes (default = dim)"
+            style={{ background: hardFilter ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
+              color: hardFilter ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>filter</button>
           {(data.companies || []).length > 1 && (() => {
             const all = data.companies || [];
             const sel = selectedCompanies;
@@ -4622,6 +4732,23 @@ export default function App() {
 
         {/* SVG CANVAS */}
         <div style={{ flex: 1, marginLeft: 230, position: "relative" }}>
+          {/* PERF OVERLAY — diagnostic mode toggle from toolbar. */}
+          {showPerf && (
+            <div style={{ position: "absolute", bottom: 8, left: 8, zIndex: 30,
+              background: T.surface + "ee", border: `1px solid ${T.border}`,
+              borderRadius: 5, padding: "6px 10px", fontSize: 9,
+              color: T.text, fontFamily: "'IBM Plex Mono', monospace",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)", pointerEvents: "none",
+              minWidth: 180 }}>
+              <div style={{ color: fps < 30 ? T.red : fps < 50 ? T.amber : T.green, fontWeight: 700 }}>{fps} fps</div>
+              <div style={{ color: T.textDim }}>nodes: {data.nodes.length}</div>
+              <div style={{ color: T.textDim }}>routes: {data.routes.length} · rules: {data.routes.reduce((a, r) => a + r.rules.length, 0)}</div>
+              <div style={{ color: T.textDim }}>op-types: {data.operationTypes.length}</div>
+              <div style={{ color: T.textDim }}>putaway: {(data.putawayRules || []).length}</div>
+              <div style={{ color: T.textDim }}>scale: {scale.toFixed(2)} · {clusterMode ? "cluster" : virtualiseRender ? "virt" : "full"}</div>
+              <div style={{ color: T.textDim }}>vp: {Math.round(viewportWorld.x1 - viewportWorld.x0)}×{Math.round(viewportWorld.y1 - viewportWorld.y0)}w</div>
+            </div>
+          )}
           {/* DRILL-IN BREADCRUMB — visible only in drill-in mode. */}
           {drillInto && (() => {
             const pivot = data.nodes.find(n => n.id === drillInto);
@@ -5095,6 +5222,8 @@ export default function App() {
                   let sn = nodeById.get(rule.src_location_id);
                   let dn = nodeById.get(rule.dest_location_id);
                   if (!sn || !dn) return null;
+                  if (clusterMode) return null; // cluster mode hides individual edges
+                  if (!isEdgeInViewport(sn, dn)) return null;
                   // Sub-location remap (option A from roadmap #50): on the main
                   // canvas (no drillInto), if src or dst is a sub-location, walk
                   // up its location_id chain to the top-level ancestor and use
@@ -5277,10 +5406,73 @@ export default function App() {
             })()}
 
             {/* NODES */}
-            {[...data.nodes].sort((a, b) => (a.z || 0) - (b.z || 0)).map(node => {
+            {/* CLUSTER MODE — at very low zoom on dense canvases, render one bubble
+                per grid cell instead of every node. Click a bubble to zoom-and-pan into
+                its area at default scale. Massive perf win on 500+ canvases. */}
+            {clusterMode && (() => {
+              const bins = new Map();
+              const visible = data.nodes.filter(n => {
+                if (hideUnused && n.type === "location" && !usedLocationIds.has(n.id)) return false;
+                if (isDeactivated(n) && !showInactive) return false;
+                if (!passesCompanyFilter(n)) return false;
+                // Sub-locations always hidden on main canvas (drill-in only)
+                if (n.type === "location" && n.data?.location_id) return false;
+                return true;
+              });
+              for (const n of visible) {
+                const cx = Math.floor((n.x + NW / 2) / CLUSTER_GRID_PX);
+                const cy = Math.floor((n.y + NH / 2) / CLUSTER_GRID_PX);
+                const key = `${cx},${cy}`;
+                if (!bins.has(key)) bins.set(key, { cx, cy, nodes: [] });
+                bins.get(key).nodes.push(n);
+              }
+              return [...bins.values()].map((bin, i) => {
+                const wx = bin.cx * CLUSTER_GRID_PX, wy = bin.cy * CLUSTER_GRID_PX;
+                const sx = wx * scale + offset.x;
+                const sy = wy * scale + offset.y;
+                const sw = CLUSTER_GRID_PX * scale;
+                const sh = CLUSTER_GRID_PX * scale;
+                const single = bin.nodes.length === 1;
+                const hue = hashColor(`cluster-${bin.cx}-${bin.cy}`, 60, 45);
+                return (
+                  <g key={`cluster-${i}`} style={{ cursor: "pointer" }}
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       const r = svgRef.current.getBoundingClientRect();
+                       const targetScale = 0.7;
+                       setScale(targetScale);
+                       setOffset({
+                         x: r.width / 2 - (wx + CLUSTER_GRID_PX / 2) * targetScale,
+                         y: r.height / 2 - (wy + CLUSTER_GRID_PX / 2) * targetScale,
+                       });
+                     }}>
+                    <rect x={sx} y={sy} width={sw} height={sh} rx={8} ry={8}
+                          fill={hue} fillOpacity={0.10}
+                          stroke={hue} strokeWidth={1.5} strokeOpacity={0.55} />
+                    <text x={sx + sw / 2} y={sy + sh / 2 - 6} fontSize={20}
+                          fill={T.text} textAnchor="middle" dominantBaseline="middle"
+                          fontWeight={700}>
+                      {bin.nodes.length}
+                    </text>
+                    <text x={sx + sw / 2} y={sy + sh / 2 + 14} fontSize={10}
+                          fill={T.textDim} textAnchor="middle"
+                          style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                      {single ? bin.nodes[0].label.slice(0, 20) : `${bin.nodes.length} nodes — click to zoom`}
+                    </text>
+                  </g>
+                );
+              });
+            })()}
+
+            {!clusterMode && [...data.nodes].sort((a, b) => (a.z || 0) - (b.z || 0)).map(node => {
               if (hideUnused && node.type === "location" && !usedLocationIds.has(node.id)) return null;
               if (isDeactivated(node) && !showInactive) return null;
               if (!passesCompanyFilter(node)) return null;
+              if (!isInViewport(node)) return null;
+              // Hard filter: when a route/rule is selected and hardFilter is on,
+              // hide every node not part of the highlight set. Warehouses always
+              // visible (orienting context).
+              if (hardFilter && routeHighlight && node.type === "location" && !routeHighlight.nodeIds.has(node.id)) return null;
               // Drill-in viewport filter: when drillInto is set, show only the
               // pivot node + its descendants. Sub-locations (n.data.location_id set)
               // are HIDDEN on the main canvas; they only render in drill-in.
@@ -5361,6 +5553,24 @@ export default function App() {
                   {/* Color tab on left edge — only on non-pill (rect) nodes */}
                   {s.shape !== "pill" && (
                     <rect x={sx} y={sy + 6 * scale} width={3 * scale} height={(NH - 12) * scale} rx={1.5 * scale} fill={s.color} fillOpacity={0.7} />
+                  )}
+                  {/* Sub-location count badge — appears on locations that have
+                      children. Click to drill in. Visual cue that detail exists. */}
+                  {node.type === "location" && childCountByParent.get(node.id) > 0 && (
+                    <g style={{ cursor: "pointer" }}
+                       onClick={(e) => { e.stopPropagation(); setDrillInto(node.id); }}>
+                      <title>{childCountByParent.get(node.id)} sub-location(s) — click to drill in</title>
+                      <rect x={sx + (NW - 36) * scale} y={sy - 5 * scale}
+                            width={32 * scale} height={14 * scale}
+                            rx={7 * scale} ry={7 * scale}
+                            fill={T.accent} fillOpacity={0.9} stroke={T.surface} strokeWidth={0.8 * scale} />
+                      <text x={sx + (NW - 20) * scale} y={sy + 3 * scale}
+                            fontSize={9 * Math.max(scale, 0.6)} fill="#fff"
+                            textAnchor="middle" dominantBaseline="middle"
+                            style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, pointerEvents: "none" }}>
+                        +{childCountByParent.get(node.id)}
+                      </text>
+                    </g>
                   )}
                   <text x={sx + (s.shape === "pill" ? 22 : 18) * scale} y={sy + NH / 2 * scale}
                         fontSize={(s.icon.length > 1 ? 13 : 16) * Math.max(scale, 0.55)}
@@ -5718,6 +5928,47 @@ export default function App() {
         for (const r of data.routes) {
           cmds.push({ id: `goto-route-${r.id}`, group: "Go to Route", label: r.label, icon: "⚡", color: ROUTE_COLORS[r.colorIdx % ROUTE_COLORS.length].stroke,
                      hint: `${r.rules.length} rule${r.rules.length !== 1 ? "s" : ""}`, run: () => doSelect(r.id) });
+        }
+        // Locations (jump-to + pan-and-zoom). Skip sub-locations on top-level
+        // search; the user can drill in if they need a sub-location.
+        const panToNode = (n) => {
+          if (!svgRef.current) return doSelect(n.id);
+          // Pull out of cluster mode if active by setting a comfortable scale.
+          const targetScale = Math.max(scale, 0.7);
+          const r = svgRef.current.getBoundingClientRect();
+          // If the node is a sub-location, drill into its parent first.
+          if (n.type === "location" && n.data?.location_id) {
+            setDrillInto(n.data.location_id);
+          }
+          setScale(targetScale);
+          setOffset({
+            x: r.width / 2 - (n.x + NW / 2) * targetScale,
+            y: r.height / 2 - (n.y + NH / 2) * targetScale,
+          });
+          doSelect(n.id);
+        };
+        for (const n of data.nodes) {
+          if (n.type === "location" || n.type === "warehouse") {
+            const sub = n.data?.location_id ? " · sub" : "";
+            cmds.push({
+              id: `goto-node-${n.id}`,
+              group: n.type === "warehouse" ? "Go to Warehouse" : "Go to Location",
+              label: n.label + sub,
+              icon: n.type === "warehouse" ? "⌂" : "◎",
+              hint: n.data?.usage || n.data?.code || "",
+              run: () => panToNode(n),
+            });
+          }
+        }
+        for (const op of data.operationTypes) {
+          cmds.push({
+            id: `goto-op-${op.id}`,
+            group: "Go to Operation",
+            label: op.label,
+            icon: "⛁",
+            hint: op.sequence_code || op.code || "",
+            run: () => doSelect(op.id),
+          });
         }
         return <CommandPalette commands={cmds} onClose={() => setPaletteOpen(false)} />;
       })()}
