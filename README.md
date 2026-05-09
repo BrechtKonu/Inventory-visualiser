@@ -1,138 +1,122 @@
 # Odoo Inventory Flow Visualiser
 
-A visual designer for Odoo inventory workflows — warehouses, locations, operation types, routes, rules, and putaway rules — delivered as a single self-contained HTML file.
+> A visual designer for Odoo inventory workflows — warehouses, locations,
+> operation types, routes, rules, putaway rules, storage categories — with
+> live two-way sync to running Odoo instances.
+
+**© 2026 Dinsdag BV.** Proprietary software. See [LICENSE](LICENSE).
+
+This Module is the intellectual property of **Dinsdag BV** (Belgium).
+It is licensed for use to Konu BV (KBO BE 0795.567.175) and its end-customer
+deployments under a separate Use Agreement; third-party use requires a
+Dinsdag-issued EULA stacked on top of the Odoo Proprietary License v1.0.
+See [LICENSE](LICENSE) for the full terms.
+
+---
+
+## What it does
+
+A single-page React app that lets consultants and customers **visualise,
+edit, and round-trip** the entire `stock.*` configuration of an Odoo 17 / 18 /
+19 instance. It loads/saves via the standard Odoo JSON-RPC interface — no
+custom server modules required for the standalone build.
+
+### Core capabilities
+
+| Feature | What it does |
+|---|---|
+| **Canvas** | Drag-and-drop visual editor for warehouses, locations, op-types, routes, rules, putaway rules. Auto-layout via route-grouped Sugiyama tier algorithm with center-axis shared nodes. |
+| **Drill-in views** | Right-click → drill into a warehouse OR a location's sub-tree. Breadcrumb navigation. Esc returns to main canvas. |
+| **Sub-locations** | Real graph nodes with parent pointers (`location_id`). Up to 50 levels deep. Cycle-safe. |
+| **Storage categories** | First-class registry with `allow_new_product`, `max_weight`, `capacity_qty`, and per-product `capacity_ids` overrides. Modal CRUD + inline editor in PropPanel. |
+| **Putaway simulator** | Punch in product + qty, see traced resolution (rule match → location → strategy → capacity check). Pure function `simulatePutaway()`. |
+| **Warehouse-preset wizard** | Add → Warehouse opens a wizard mirroring Odoo's flag cascade (reception_steps, delivery_steps, manufacture_steps, buy/manufacture_to_resupply, resupply_wh_ids). Auto-generates locations, op-types, routes, rules with `__autoGen` provenance tags. Live-regenerates on flag edits with shrink-detection dialog. |
+| **Multi-company** | Filter by company; per-entity `company_id` round-trips with Odoo. |
+| **Live Odoo I/O** | Fetch from / push to a running Odoo via JSON-RPC. Diffs computed against a snapshot. |
+| **Multi-format export** | SVG, PNG, PDF, JSON, Markdown handover doc, Miro JSON, Visio `.vsdx` (Miro-import-ready). |
+| **Huge-warehouse UX** | Sized for DRBB-class deployments (38 warehouses / 23k locations). Standard/Advanced UI mode toggle. Viewport-virtualised render, cluster mode at low zoom, named viewports, perf overlay. |
+
+### Codebase stats
+
+| Module | Lines | Purpose |
+|---|--:|---|
+| `odoo-inventory-flow (2).jsx` | 6,460 | Main React component — canvas, panels, modals, fetch/push logic |
+| `src/warehouse-presets.js` | 559 | Pure-function preset generators + diff algorithm |
+| `src/vsdx-exporter.js` | 282 | Visio `.vsdx` writer (inline ZIP, no deps) |
+| `src/putaway-simulator.js` | 186 | In-browser Odoo putaway resolution algorithm |
+| `src/markdown-exporter.js` | 149 | Project-handover doc generator |
+| `src/miro-exporter.js` | 132 | Miro REST API v2 item-payload generator |
+| `src/location-tree.js` | 73 | Tree helpers (children, descendants, ancestors, cycles) |
+| `src/warehouse-presets.test.mjs` | 558 | 41-test pure-module test suite |
+
+---
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 18 or later
+- A modern browser (Chrome / Firefox / Safari / Edge — current versions)
+- Optional: a running Odoo 17 / 18 / 19 instance with API key access
 
 ## Installation
 
 ```bash
 npm install
-npm run build
+npm run build      # builds dist/odoo-inventory-flow.html (single self-contained file)
 ```
 
-This produces `dist/odoo-inventory-flow.html` — a single file with all JavaScript inlined. No server required to open it.
+## Usage
 
----
-
-## Running
-
-### Offline / manual mode
-
-Open `dist/odoo-inventory-flow.html` directly in your browser. Design and edit workflows freely, export/import as JSON. No live Odoo connection is available in this mode.
-
-### Live Odoo connection (proxy mode)
-
-Browsers block direct Odoo API calls from a local file due to CORS. Use the included proxy server:
+### Standalone (offline editing only)
 
 ```bash
-npm run proxy
+open dist/odoo-inventory-flow.html
 ```
 
-Then open **http://localhost:4173**.
+The app loads a sample `Full Demo Warehouse` setup. Edit, export, re-import.
 
-Click the **API** button in the toolbar, enter your Odoo URL, database name, username, and API key. You can then fetch your real inventory configuration or write changes back.
-
-> Proxy sessions are held in memory — they are lost when the proxy server restarts.
-
-Override the default address with environment variables:
+### With live Odoo connection
 
 ```bash
-HOST=0.0.0.0 PORT=8080 npm run proxy
+npm run proxy      # starts http://localhost:4173
 ```
 
----
+The proxy server forwards JSON-RPC calls to your Odoo instance, sidestepping
+browser CORS restrictions. Configure URL / DB / username / API key in the
+visualiser's settings (cog icon, top-right).
 
-## Canvas controls
+### Embedded inside the Konu Tools Odoo module
 
-| Action | Result |
-|--------|--------|
-| Scroll wheel | Zoom in / out |
-| Click + drag canvas | Pan |
-| Click node or route | Select (shows property panel) |
-| Drag node | Move node |
-| Shift + click nodes | Add to / remove from multi-selection |
-| Drag any selected node | Move all selected nodes together |
-| Ctrl+Z / Ctrl+Y | Undo / Redo (up to 50 steps) |
+`addons/konu_tools/` provides a server-side controller that injects the
+visualiser into Konu's own Odoo at `/konu_tools/visualiser/<connection_id>`,
+forwarding RPC through Odoo's authenticated session. See the module README
+for the connection-registry workflow.
 
-Press the **?** button in the toolbar to show a quick-reference card for these shortcuts at any time.
+## Tests
 
----
+```bash
+npm run test:presets   # 41 pure-module tests, ~1s
+```
 
-## Toolbar
+The pure modules (`warehouse-presets`, `location-tree`, `putaway-simulator`,
+`markdown-exporter`, `miro-exporter`, `vsdx-exporter`) are zero-dependency
+and tested via a tiny node:assert harness. UI is browser-tested manually.
 
-| Button | Action |
-|--------|--------|
-| **Add** | Add a new node, operation type, or route |
-| **API** | Open the API / code-generation panel |
-| **⚙** | Configure Odoo connection (URL, database, API key) |
-| **⊞** | Auto-layout — automatically arrange nodes |
-| **☀ / ☾** | Toggle light / dark theme |
-| **↩ / ↪** | Undo / Redo |
-| **?** | Show canvas tips |
-| **Fit** | Zoom and pan to fit all nodes in view |
-| **nn%** | Current zoom level |
+## Project tracking
 
----
+- [`CHANGELOG.md`](CHANGELOG.md) — feature timeline, version-by-version
+- [`TIMESHEET.md`](TIMESHEET.md) — hours per feature for cost-of-build
+- [`docs/superpowers/specs/`](docs/superpowers/specs) — design docs per feature
+- [`docs/superpowers/plans/`](docs/superpowers/plans) — implementation plans
 
-## Auto-layout
+## Authorship & IP
 
-Click **⊞** to automatically arrange all nodes based on the inventory flow direction:
+This Module was authored by **Brecht Soenen** (Dinsdag BV) between
+**2026-03-31** and the present. Every commit carries the `Dinsdag BV`
+copyright header (see top of `odoo-inventory-flow (2).jsx`,
+`src/main.jsx`, and every file under `src/`).
 
-- **Vendors (supplier)** — leftmost column
-- **Internal locations** — middle columns, ordered by depth in the route graph
-- **Customers** — rightmost column
-- **Production & transit locations** — top lane, above the main flow
-- **Warehouses** — header row at the very top
+**Konu BV is a licensee, not the author.** Konu deploys this Module to its
+own end-customers under the terms of the Dinsdag BV ↔ Konu BV Module Use
+Agreement; intellectual-property rights remain exclusively with Dinsdag BV.
 
-The layout is computed from the actual route rules and operation types, so receipt flows land on the left and delivery flows on the right. The action is undoable with Ctrl+Z.
-
----
-
-## Routes & Rules sidebar
-
-The left sidebar lists all routes and their rules. Use the **filter input** at the top to search by name — it matches against route names and rule names simultaneously.
-
-Click any route or rule to select it and open its properties in the right panel. Use the eye icon to hide or show a route's edges on the canvas. Click **+ Add rule** under a route to append a new rule to it.
-
----
-
-## Property panel
-
-Clicking a node, operation type, route, or rule opens its property panel on the right. Fields map directly to Odoo model fields. Changes take effect immediately and are undoable.
-
----
-
-## Putaway rules
-
-Internal location nodes show a small **⇲** badge in the top-right corner when putaway rules exist for that location (the number indicates how many). Click the badge to open the putaway panel, where you can add, edit, and delete rules for that location.
-
----
-
-## Saving your work
-
-State is **not saved automatically** — it resets to the built-in sample data on every page load.
-
-- **Export** (via the API panel or toolbar) — saves the full diagram and API configuration as a JSON file.
-- **Import** — restores a previously exported JSON file.
-
----
-
-## API / code generation
-
-The **API** panel provides two tabs:
-
-- **Fetch** — a ready-to-run Python `xmlrpc` script that reads your Odoo inventory configuration into variables.
-- **Write** — a Python script that applies your current diagram as configuration changes to a live Odoo instance.
-
-Both scripts are generated from the current diagram state and can be copied to the clipboard.
-
-When the proxy server is running and credentials are configured, the panel can also make live read/write calls directly.
-
----
-
-## Light and dark mode
-
-Use the **☀ / ☾** button in the toolbar to switch between the dark industrial blueprint theme (default) and a light theme. The preference is not persisted between page loads.
+For licensing enquiries: `brecht@dinsdag.be`.
