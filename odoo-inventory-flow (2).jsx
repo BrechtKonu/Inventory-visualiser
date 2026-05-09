@@ -2671,6 +2671,18 @@ export default function App() {
   // Multi-company filter: when non-null, render only entities whose company_id
   // is in the set. null = "All companies" (show everything regardless of tag).
   const [selectedCompanies, setSelectedCompanies] = useState(null);
+  // Standard/Advanced UI mode. Persisted in localStorage so it survives reloads.
+  // Standard = simple-warehouse user; just the canvas, basic toolbar, no overlays.
+  // Advanced = power-user; perf overlay + filter mode + named viewports + sidebar
+  //           groupings + heavier search options.
+  const [uiMode, setUiMode] = useState(() => {
+    try { return localStorage.getItem('uiMode') === 'advanced' ? 'advanced' : 'standard'; }
+    catch (_) { return 'standard'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('uiMode', uiMode); } catch (_) { /* ignore */ }
+  }, [uiMode]);
+  const isAdvanced = uiMode === 'advanced';
   // Perf overlay toggle (off by default; useful at 500+ nodes for diagnostics).
   const [showPerf, setShowPerf] = useState(false);
   // FPS tracker — only updates when overlay is on, to avoid wasteful state churn.
@@ -2692,6 +2704,20 @@ export default function App() {
   // Filter mode: when a route is selected, hide non-related entities entirely
   // instead of just dimming. Off = dim (current behaviour); On = hard-hide.
   const [hardFilter, setHardFilter] = useState(false);
+  // Sidebar route grouping (advanced UI mode, ≥12 routes). Set of collapsed colorIdx.
+  const [routeGroupCollapsed, setRouteGroupCollapsed] = useState(new Set());
+  // Per-location: which parents have their children "expanded inline" on the
+  // main canvas (alternative to drill-in for users who want flat view).
+  const [expandedInline, setExpandedInline] = useState(new Set());
+  // Named viewports — saved camera + filter state. Persisted in localStorage.
+  // Shape: [{ name, scale, offset, drillInto, selectedCompanies, hideUnused, opVizMode }]
+  const [namedViewports, setNamedViewports] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('namedViewports') || '[]'); }
+    catch (_) { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('namedViewports', JSON.stringify(namedViewports)); } catch (_) {}
+  }, [namedViewports]);
   // Helper: does an entity pass the company filter?
   const passesCompanyFilter = useCallback((e) => {
     if (!selectedCompanies) return true;
@@ -2838,7 +2864,21 @@ export default function App() {
 
   // Export diagram to JSON file
   const handleExport = useCallback(() => {
-    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data, apiCfg }, null, 2)], { type: "application/json" });
+    // For huge canvases (DRBB-scale: 23k locations → ~10MB JSON), serialise
+    // without indentation and skip the transient _quantsByLocation map (it's
+    // a runtime cache, not part of the diagram). Warn if the result is >5MB.
+    const exportData = { ...data };
+    if (exportData._quantsByLocation) delete exportData._quantsByLocation;
+    const big = data.nodes.length > 1000;
+    const json = big
+      ? JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: exportData, apiCfg })
+      : JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: exportData, apiCfg }, null, 2);
+    const sizeMB = json.length / (1024 * 1024);
+    if (sizeMB > 5) {
+      const ok = confirm(`Export size: ${sizeMB.toFixed(1)} MB (${data.nodes.length} nodes, ${big ? 'unindented' : 'pretty'}). Proceed with download?`);
+      if (!ok) return;
+    }
+    const blob = new Blob([json], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "odoo-inventory.json";
@@ -4520,16 +4560,72 @@ export default function App() {
                 style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>
             {data.nodes.length}n · {data.operationTypes.length}op · {data.routes.length}r · {data.routes.reduce((a, r) => a + r.rules.length, 0)}rl
           </span>
-          <button onClick={() => setShowPerf(s => !s)}
-            title="Toggle performance overlay (FPS, virt status, render counts)"
-            style={{ background: showPerf ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
-              color: showPerf ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
-              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>perf</button>
-          <button onClick={() => setHardFilter(s => !s)}
-            title="Hard filter: when a route/rule is selected, HIDE non-related nodes (default = dim)"
-            style={{ background: hardFilter ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
-              color: hardFilter ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
-              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>filter</button>
+          <button onClick={() => setUiMode(m => m === 'advanced' ? 'standard' : 'advanced')}
+            title={isAdvanced ? "Advanced mode — extra controls visible. Click to switch to Standard." : "Standard mode — minimal controls. Click to switch to Advanced for perf/filter/viewports."}
+            style={{ background: isAdvanced ? T.accentSoft : "transparent", border: `1px solid ${isAdvanced ? T.accent : T.border}`,
+              color: isAdvanced ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>
+            {isAdvanced ? '◆ adv' : '◇ std'}
+          </button>
+          {isAdvanced && (
+            <>
+              <button onClick={() => setShowPerf(s => !s)}
+                title="Toggle performance overlay (FPS, virt status, render counts)"
+                style={{ background: showPerf ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
+                  color: showPerf ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
+                  fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>perf</button>
+              <button onClick={() => setHardFilter(s => !s)}
+                title="Hard filter: when a route/rule is selected, HIDE non-related nodes (default = dim)"
+                style={{ background: hardFilter ? T.accentSoft : "transparent", border: `1px solid ${T.border}`,
+                  color: hardFilter ? T.accent : T.textDim, fontSize: 9, padding: "2px 6px", borderRadius: 3,
+                  fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer" }}>filter</button>
+              {/* Named viewports — save and switch. Saved state: scale+offset+drillInto+companies+hideUnused+opVizMode. */}
+              <details style={{ position: "relative" }}>
+                <summary title="Named viewports — save current view, switch between named camera+filter states"
+                  style={{ listStyle: "none", cursor: "pointer", fontSize: 9, color: T.textDim,
+                    background: namedViewports.length ? T.surfaceHover : "transparent", border: `1px solid ${T.border}`,
+                    borderRadius: 3, padding: "2px 6px", fontFamily: "'IBM Plex Mono', monospace", userSelect: "none" }}>
+                  ⊞ views{namedViewports.length ? ` (${namedViewports.length})` : ''}
+                </summary>
+                <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: 60,
+                  background: T.surface, border: `1px solid ${T.border}`, borderRadius: 5,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.4)", padding: 6, minWidth: 220 }}>
+                  <button onClick={() => {
+                      const name = prompt('Save current viewport as:');
+                      if (!name) return;
+                      const vp = { name, scale, offset, drillInto, selectedCompanies: selectedCompanies ? [...selectedCompanies] : null, hideUnused, opVizMode };
+                      setNamedViewports(p => [...p.filter(x => x.name !== name), vp]);
+                    }}
+                    style={{ width: "100%", textAlign: "left", padding: "4px 8px", background: T.accentSoft, border: "none",
+                      color: T.accent, fontSize: 11, borderRadius: 3, cursor: "pointer", fontFamily: "inherit", marginBottom: 4 }}>
+                    + Save current view
+                  </button>
+                  {namedViewports.length === 0 && (
+                    <div style={{ padding: "6px 8px", fontSize: 10, color: T.textDim, fontStyle: "italic" }}>(no saved views yet)</div>
+                  )}
+                  {namedViewports.map(vp => (
+                    <div key={vp.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button onClick={() => {
+                          setScale(vp.scale); setOffset(vp.offset);
+                          setDrillInto(vp.drillInto || null);
+                          setSelectedCompanies(vp.selectedCompanies ? new Set(vp.selectedCompanies) : null);
+                          if (typeof vp.hideUnused === 'boolean') setHideUnused(vp.hideUnused);
+                          if (vp.opVizMode) setOpVizMode(vp.opVizMode);
+                        }}
+                        style={{ flex: 1, textAlign: "left", padding: "4px 8px", background: "transparent", border: "none",
+                          color: T.text, fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {vp.name}
+                      </button>
+                      <button onClick={() => setNamedViewports(p => p.filter(x => x.name !== vp.name))}
+                        title="Delete this viewport"
+                        style={{ background: "transparent", border: "none", color: T.red, fontSize: 11, cursor: "pointer", padding: "2px 6px" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </>
+          )}
           {(data.companies || []).length > 1 && (() => {
             const all = data.companies || [];
             const sel = selectedCompanies;
@@ -4682,7 +4778,20 @@ export default function App() {
                 ? baseRoutes.map(r => ({ ...r, rules: r.rules.filter(rl => rl.label.toLowerCase().includes(q)) })).filter(r => r.label.toLowerCase().includes(q) || r.rules.length > 0)
                 : baseRoutes;
               if (filtered.length === 0) return <div style={{ padding: "12px 14px", fontSize: 9, color: T.textDim }}>No matches</div>;
-              return filtered.map(route => {
+              // Auto-grouping by colorIdx kicks in when there are many routes.
+              // Group headers are collapsible (state in routeGroupCollapsed).
+              // Search query (q) bypasses grouping — flat results easier to scan.
+              const useGroups = isAdvanced && !q && filtered.length > 12;
+              const sectionsForGroups = useGroups ? (() => {
+                const groups = new Map();
+                for (const r of filtered) {
+                  const key = r.colorIdx % ROUTE_COLORS.length;
+                  if (!groups.has(key)) groups.set(key, []);
+                  groups.get(key).push(r);
+                }
+                return [...groups.entries()].sort(([a], [b]) => a - b);
+              })() : null;
+              const renderRow = (route) => {
               const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
               const h = hidden.has(route.id);
               const dim = isDeactivated(route);
@@ -4717,7 +4826,28 @@ export default function App() {
                   </>)}
                 </div>
               );
-            });
+              };  // end renderRow
+              if (sectionsForGroups) {
+                return sectionsForGroups.map(([cIdx, rs]) => {
+                  const rc = ROUTE_COLORS[cIdx];
+                  const isOpen = !routeGroupCollapsed.has(cIdx);
+                  return (
+                    <div key={`grp-${cIdx}`} style={{ marginBottom: 4 }}>
+                      <div onClick={() => setRouteGroupCollapsed(p => { const n = new Set(p); n.has(cIdx) ? n.delete(cIdx) : n.add(cIdx); return n; })}
+                        style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", cursor: "pointer",
+                          background: T.surfaceHover, fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace",
+                          textTransform: "uppercase", letterSpacing: "0.5px", userSelect: "none" }}>
+                        <span style={{ width: 8, textAlign: "center" }}>{isOpen ? '▾' : '▸'}</span>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: rc.stroke }} />
+                        <span style={{ flex: 1 }}>group {cIdx + 1}</span>
+                        <span>{rs.length}</span>
+                      </div>
+                      {isOpen && rs.map(renderRow)}
+                    </div>
+                  );
+                });
+              }
+              return filtered.map(renderRow);
             })()}
           </div>
           {/* Add route button at bottom */}
@@ -5491,8 +5621,11 @@ export default function App() {
                 })();
                 if (!isPivot && !isDesc) return null;
               } else {
-                // Main canvas: hide all sub-locations (they only show in drill-in).
-                if (node.type === "location" && node.data?.location_id) return null;
+                // Main canvas: hide all sub-locations EXCEPT children of any
+                // parent the user has explicitly expanded inline.
+                if (node.type === "location" && node.data?.location_id) {
+                  if (!expandedInline.has(node.data.location_id)) return null;
+                }
               }
               // Warehouses with children render as a blob+name-tag layer above; hide the small rect.
               if (node.type === "warehouse" && (warehouseChildren.get(node.id)?.locations.length || 0) > 0) return null;
@@ -5554,24 +5687,39 @@ export default function App() {
                   {s.shape !== "pill" && (
                     <rect x={sx} y={sy + 6 * scale} width={3 * scale} height={(NH - 12) * scale} rx={1.5 * scale} fill={s.color} fillOpacity={0.7} />
                   )}
-                  {/* Sub-location count badge — appears on locations that have
-                      children. Click to drill in. Visual cue that detail exists. */}
-                  {node.type === "location" && childCountByParent.get(node.id) > 0 && (
-                    <g style={{ cursor: "pointer" }}
-                       onClick={(e) => { e.stopPropagation(); setDrillInto(node.id); }}>
-                      <title>{childCountByParent.get(node.id)} sub-location(s) — click to drill in</title>
-                      <rect x={sx + (NW - 36) * scale} y={sy - 5 * scale}
-                            width={32 * scale} height={14 * scale}
-                            rx={7 * scale} ry={7 * scale}
-                            fill={T.accent} fillOpacity={0.9} stroke={T.surface} strokeWidth={0.8 * scale} />
-                      <text x={sx + (NW - 20) * scale} y={sy + 3 * scale}
-                            fontSize={9 * Math.max(scale, 0.6)} fill="#fff"
-                            textAnchor="middle" dominantBaseline="middle"
-                            style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, pointerEvents: "none" }}>
-                        +{childCountByParent.get(node.id)}
-                      </text>
-                    </g>
-                  )}
+                  {/* Sub-location count badge — appears on locations with children.
+                      Left-click → drill in. Shift-click (or right-click) → expand
+                      inline on this canvas. Visual cue that detail exists. */}
+                  {node.type === "location" && childCountByParent.get(node.id) > 0 && (() => {
+                    const isExpanded = expandedInline.has(node.id);
+                    return (
+                      <g style={{ cursor: "pointer" }}
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           if (e.shiftKey) {
+                             setExpandedInline(p => { const n = new Set(p); n.has(node.id) ? n.delete(node.id) : n.add(node.id); return n; });
+                           } else {
+                             setDrillInto(node.id);
+                           }
+                         }}
+                         onContextMenu={(e) => {
+                           e.preventDefault(); e.stopPropagation();
+                           setExpandedInline(p => { const n = new Set(p); n.has(node.id) ? n.delete(node.id) : n.add(node.id); return n; });
+                         }}>
+                        <title>{childCountByParent.get(node.id)} sub-location(s) — click to drill in · shift/right-click to {isExpanded ? 'collapse' : 'expand'} inline</title>
+                        <rect x={sx + (NW - 36) * scale} y={sy - 5 * scale}
+                              width={32 * scale} height={14 * scale}
+                              rx={7 * scale} ry={7 * scale}
+                              fill={isExpanded ? T.green : T.accent} fillOpacity={0.9} stroke={T.surface} strokeWidth={0.8 * scale} />
+                        <text x={sx + (NW - 20) * scale} y={sy + 3 * scale}
+                              fontSize={9 * Math.max(scale, 0.6)} fill="#fff"
+                              textAnchor="middle" dominantBaseline="middle"
+                              style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, pointerEvents: "none" }}>
+                          {isExpanded ? '−' : '+'}{childCountByParent.get(node.id)}
+                        </text>
+                      </g>
+                    );
+                  })()}
                   <text x={sx + (s.shape === "pill" ? 22 : 18) * scale} y={sy + NH / 2 * scale}
                         fontSize={(s.icon.length > 1 ? 13 : 16) * Math.max(scale, 0.55)}
                         fill={s.color} textAnchor="middle" dominantBaseline="central">{s.icon}</text>

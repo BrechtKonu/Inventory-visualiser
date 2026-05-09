@@ -456,30 +456,34 @@ Key shape observations that drove design:
 
 Every commit touching scale-sensitive code should ask: "does this still work at 23k locations?" The cluster mode + virtualised render shipped in `aa6fad9` are sized for this.
 
-#### 🟨 UI/UX for huge warehouses (partial — quick wins shipped)
+#### ✅ UI/UX for huge warehouses (DONE — Standard/Advanced split)
 
 Built incrementally as features land. Quick wins shipped in commit `30302de`:
+
+**Architecture:** All advanced controls hide behind a Standard/Advanced UI mode toggle (top toolbar, persisted in localStorage). Standard = simple-warehouse user, just the canvas + basic toolbar. Advanced = power-user with perf overlay, hard-filter mode, named viewports, sidebar route grouping. The toggle only adds complexity for users who need it.
 
 **Shipped:**
 - ✅ Sub-locations hidden from main canvas by default; only render in drill-in. 500-bin warehouses don't bloat the main view.
 - ✅ `nodeById` Map memo replaces hot-path `data.nodes.find(...)` calls in edge render. At 500 nodes, saves ~100k string comparisons per render.
 - ✅ Typeahead m2o dropdowns when option count > 30. Datalist-backed input lets the browser narrow matches as you type. Falls back to native `<select>` for small lists.
 - ✅ Multi-company filter (only renders when >1 company) dims everything outside the selected set.
+- ✅ **Viewport-based virtualised render** — viewport rect memoised on scale/offset; nodes whose AABB doesn't intersect (with NW margin) are skipped. Threshold = 80 nodes; below, full render. Edges similarly skipped when both endpoints are off-screen.
+- ✅ **Cluster mode at low zoom** — when scale<0.32 and virtualisation is on, nodes are grid-binned (220px world cells) and rendered as one bubble per cell with count + click-to-zoom-and-pan-into-bin.
+- ✅ **Auto-layout perf cap** — Sugiyama BC iterations 12→6→3 above 200/500 nodes.
+- ✅ **Jump-to-X palette entries** — Go to Location / Warehouse / Operation entries in the command palette pan-and-select; auto-drills-in if target is a sub-location.
+- ✅ **Sub-loc count badge** — locations with children show `+N` (or `−N` when expanded inline) accent pill near top-right; click drills in, shift/right-click expands inline.
+- ✅ **Sub-location collapse / expand inline** — main canvas hides sub-locations by default but the user can expand individual parents inline (state in `expandedInline`). Drill-in remains the primary path.
+- ✅ **Perf overlay** (Advanced) — fps + entity counts + scale + viewport size + virt/cluster/full mode. Off by default.
+- ✅ **Hard-filter mode** (Advanced) — when a route/rule is selected, hide non-related nodes entirely instead of dimming.
+- ✅ **Standard/Advanced UI mode toggle** — `◇ std` / `◆ adv` button in toolbar, persisted via localStorage.
+- ✅ **Sidebar route grouping** (Advanced) — auto-groups routes by colorIdx into collapsible sections when ≥12 routes. Search bypasses grouping.
+- ✅ **Named viewports** (Advanced) — save current scale + offset + drillInto + selectedCompanies + hideUnused + opVizMode as a named view. Persisted in localStorage. Toolbar dropdown to switch.
+- ✅ **JSON export size guardrails** — exports >1000 nodes use unindented JSON. Size >5MB shows a confirm before download. `_quantsByLocation` runtime cache stripped from export.
 
-**Still pending (in priority order for the next pass):**
-
-- **Virtualised SVG rendering** — only emit nodes/edges within the current viewport. Today every node is in the DOM even if off-screen. SVG handles ~1k nodes; perf dies above. Most impactful at 500+. ~1-2 days.
-- **Cluster mode** — nodes within a small distance group into a single cluster bubble; zoom-in expands. Pattern from Cytoscape.js / Sigma.js. Most useful at 1k+. ~1-2 days.
-- **Search-driven navigation** — `/` already opens command palette. Extend with "jump to location/rule" mode that pans-and-selects. Already half-there. ~half day.
-- **Filter mode** — sidebar gains "Show only routes touching X" filter; canvas dims everything else. ~half day.
-- **Multi-canvas tabs / named viewports** — save and restore named camera + filter states for "inbound zone", "outbound zone", "manufacturing" etc. ~1 day.
-- **Performance instrumentation** — measure first-paint, drag-jank, autolayout time vs node count. Set a budget (e.g. <100ms/frame at 500 nodes). Add a perf overlay toggle. ~half day.
-- **Sub-location collapse on main canvas** — let parents show "+12 children" when many sub-locations exist; click to drill in. ~half day.
-- **Sidebar route grouping** — at 100+ routes the sidebar list becomes a wall. Group by `colorIdx` or by a manual `category` field with collapsible headers. ~half day.
-- **Auto-layout perf cap** — Sugiyama is O(N² · iterations). At 500+ nodes the 12 barycenter passes take seconds. Cap iterations adaptively; offer a "fast layout" toggle that skips barycenter for >200 nodes. ~half day.
-- **JSON export size budget** — measure for 1k-node export. Likely fine but worth pinning a number. Add streaming download if it grows >5MB.
-
-Total remaining estimate: **~5-6 days** for the full pending list. Recommend doing virtualised rendering and cluster mode together as one commit (~2 days) — they're the load-bearing improvements. Other items are incremental.
+**Out of scope (deferred to specific roadmap items):**
+- PutawayPanel collapsed-by-default (#65) — different surface, separate task.
+- Per-warehouse drill-in scope (#66) — sized for DRBB's 38 warehouses.
+- max_volume on storage categories (#67) — DRBB-specific.
 
 #### 🟦 PutawayPanel collapsed-by-default (DRBB-driven)
 
