@@ -6,6 +6,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from "react"
 import { presetGenerator, presetDiff } from "./src/warehouse-presets.js";
 import { exportMarkdown } from "./src/markdown-exporter.js";
 import { exportMiroJson } from "./src/miro-exporter.js";
+import { exportVsdx } from "./src/vsdx-exporter.js";
 import { simulatePutaway } from "./src/putaway-simulator.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
@@ -3137,6 +3138,19 @@ export default function App() {
     w.document.close();
   }, [buildExportSvg]);
 
+  // Export as Visio .vsdx — Miro import-ready (REST API + native readers
+  // accept this format). Sits alongside JSON + Markdown exporters.
+  const handleExportVsdx = useCallback(() => {
+    const blob = exportVsdx(data, { title: 'Warehouse Setup' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `warehouse-setup-${new Date().toISOString().slice(0, 10)}.vsdx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+  }, [data]);
+
   // Export the full setup as a Miro-import-ready JSON dump.
   // User runs their own script to POST items[] / tags[] to Miro REST API.
   const handleExportMiro = useCallback(() => {
@@ -4798,6 +4812,7 @@ export default function App() {
                 { id: "ex-pdf",  icon: "▤",   label: "Export PDF (browser print)", hint: "Opens print dialog",     run: handleExportPdf },
                 { id: "ex-md",   icon: "✎",   label: "Export Markdown",            hint: "Project handover document", run: handleExportMarkdown },
                 { id: "ex-miro", icon: "▽",   label: "Export Miro (JSON)",         hint: "Items + connectors + tags for Miro REST API", run: handleExportMiro },
+                { id: "ex-vsdx", icon: "✦",   label: "Export Visio (.vsdx)",       hint: "Miro accepts this — File → Import → Visio", run: handleExportVsdx },
               ]});
             }}>Export</Btn>
           <Btn small compact={compact} icon="download" onClick={() => importRef.current?.click()} variant="ghost" title="Import diagram from JSON">Import</Btn>
@@ -5198,11 +5213,11 @@ export default function App() {
 
             {/* OP TYPE WASH — faded color rect per op-type, only in 'pills_wash' mode.
                 Replaces the older blob+leader-line UI; pill rendering happens after edges below. */}
-            {opVizMode === 'pills_wash' && (() => {
+            {opVizMode === 'pills_wash' && drillIntoType !== 'location' && (() => {
               const PAD = 30;
               return data.operationTypes.map(op => {
-                const sn = data.nodes.find(n => n.id === op.src_location_id);
-                const dn = data.nodes.find(n => n.id === op.dest_location_id);
+                const sn = nodeById.get(op.src_location_id);
+                const dn = nodeById.get(op.dest_location_id);
                 if (!sn || !dn) return null;
                 const minX = Math.min(sn.x, dn.x) - PAD;
                 const minY = Math.min(sn.y, dn.y) - PAD;
@@ -5455,9 +5470,10 @@ export default function App() {
               return layers;
             })()}
 
-            {/* ROUTE RULE EDGES — visible on main canvas AND in warehouse drill-in.
-                Hidden only in location drill-in (which uses its own layer set). */}
-            {(!drillInto || drillIntoType === 'warehouse') && (() => {
+            {/* ROUTE RULE EDGES — visible on main canvas, warehouse drill-in,
+                AND location drill-in (where they show sub-loc-level routing
+                alongside the tree edges + putaway arrows). */}
+            {(() => {
               const edgeOffsets = edgeOffsetMap;
               return data.routes.map(route => {
                 if (hidden.has(route.id)) return null;
@@ -5484,6 +5500,25 @@ export default function App() {
                       return code && (cn === code || cn.startsWith(code + '/'));
                     };
                     if (!belongsToWh(sn) || !belongsToWh(dn)) return null;
+                  }
+                  // Location drill-in: only show rules where both endpoints
+                  // are the pivot OR descendants of the pivot. Skips rules
+                  // pointing OUT of the subtree.
+                  if (drillInto && drillIntoType === 'location') {
+                    const isPivotOrDesc = (n) => {
+                      if (!n || n.type !== 'location') return false;
+                      if (n.id === drillInto) return true;
+                      let cur = n, depth = 0;
+                      while (cur && depth < 50) {
+                        const pid = cur.data?.location_id;
+                        if (pid === drillInto) return true;
+                        if (!pid) return false;
+                        cur = nodeById.get(pid);
+                        depth++;
+                      }
+                      return false;
+                    };
+                    if (!isPivotOrDesc(sn) || !isPivotOrDesc(dn)) return null;
                   }
                   // Sub-location remap (option A from roadmap #50): on the main
                   // canvas (no drillInto), if src or dst is a sub-location, walk
@@ -5589,9 +5624,38 @@ export default function App() {
                 for (const rule of route.rules) {
                   if (!rule.picking_type_id) continue;
                   if (!opById.has(rule.picking_type_id)) continue;
-                  const sn = data.nodes.find(n => n.id === rule.src_location_id);
-                  const dn = data.nodes.find(n => n.id === rule.dest_location_id);
+                  const sn = nodeById.get(rule.src_location_id);
+                  const dn = nodeById.get(rule.dest_location_id);
                   if (!sn || !dn) continue;
+                  // Drill-in gating: only render a pill if the rule's edge is
+                  // actually drawn (matches the route-edges layer's gating).
+                  if (drillInto && drillIntoType === 'warehouse') {
+                    const wh = data.nodes.find(n => n.id === drillInto);
+                    const code = wh?.data?.code || '';
+                    const belongsToWh = (n) => {
+                      const u = n.data?.usage;
+                      if (u === 'supplier' || u === 'customer' || u === 'inventory') return true;
+                      if (n.__autoGen?.warehouseId === drillInto) return true;
+                      const cn = n.data?.complete_name || n.label || '';
+                      return code && (cn === code || cn.startsWith(code + '/'));
+                    };
+                    if (!belongsToWh(sn) || !belongsToWh(dn)) continue;
+                  }
+                  if (drillInto && drillIntoType === 'location') {
+                    const isPivotOrDesc = (n) => {
+                      if (n.id === drillInto) return true;
+                      let cur = n, depth = 0;
+                      while (cur && depth < 50) {
+                        const pid = cur.data?.location_id;
+                        if (pid === drillInto) return true;
+                        if (!pid) return false;
+                        cur = nodeById.get(pid);
+                        depth++;
+                      }
+                      return false;
+                    };
+                    if (!isPivotOrDesc(sn) || !isPivotOrDesc(dn)) continue;
+                  }
                   const key = `${rule.src_location_id}\t${rule.dest_location_id}`;
                   if (!groupBySrcDst.has(key)) groupBySrcDst.set(key, []);
                   groupBySrcDst.get(key).push({ rule, route });
@@ -6219,6 +6283,7 @@ export default function App() {
           { id: "data-pdf",     group: "Data", label: "Export as PDF (print)", icon: "▤", run: handleExportPdf },
           { id: "data-md",      group: "Data", label: "Export as Markdown", icon: "✎", run: handleExportMarkdown },
           { id: "data-miro",    group: "Data", label: "Export as Miro JSON", icon: "▽", run: handleExportMiro },
+          { id: "data-vsdx",    group: "Data", label: "Export as Visio (.vsdx)", icon: "✦", run: handleExportVsdx },
           { id: "data-import",  group: "Data", label: "Import JSON…",   icon: "⬆", run: () => importRef.current?.click() },
           { id: "data-fetch",   group: "Data", label: "Fetch from Odoo", icon: "⏬", hint: KONU_CFG ? `Connection: ${KONU_CFG.connectionName}` : "Uses configured credentials", run: handleFetchFromOdoo },
           { id: "data-push",    group: "Data", label: "Push to Odoo",    icon: "⏫", hint: fetchedSnapshot ? "Diff against last fetch" : "Fetch first to enable", run: handlePushToOdoo },

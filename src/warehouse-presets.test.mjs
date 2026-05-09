@@ -555,4 +555,113 @@ it('simulatePutaway: falls back to category default when no per-product entry', 
   assert.equal(r.capacityCheck, 'ok'); // 40 + 5 = 45 < 50
 });
 
+// ── vsdx-exporter tests ─────────────────────────────────────────────────
+import { exportVsdx } from './vsdx-exporter.js';
+
+const vsdxData = () => ({
+  nodes: [
+    { id: 'n-stock',   type: 'location',  label: 'Stock',     x: 100, y: 100, data: { usage: 'internal' } },
+    { id: 'n-cust',    type: 'location',  label: 'Customers', x: 400, y: 100, data: { usage: 'customer' } },
+    { id: 'n-vendor',  type: 'location',  label: 'Vendors',   x: 0,   y: 100, data: { usage: 'supplier' } },
+    { id: 'n-wh',      type: 'warehouse', label: 'WH',        x: 50,  y: 300, data: { code: 'WH' } },
+    // Sub-location: should be skipped on top-level page.
+    { id: 'n-bin',     type: 'location',  label: 'Bin A',     x: 200, y: 200, data: { usage: 'internal', location_id: 'n-stock' } },
+  ],
+  routes: [
+    { id: 'r1', name: 'Ship', rules: [
+      { src_location_id: 'n-stock', dest_location_id: 'n-cust', action: 'pull', label: 'ship' },
+    ]},
+  ],
+  operationTypes: [],
+  putawayRules: [],
+  storageCategories: [],
+});
+
+// Minimal in-process ZIP reader: scans EOCD, walks central dir, returns name → bytes.
+const readZip = (u8) => {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  // Find EOCD (0x06054b50) — scan from end.
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('no EOCD');
+  const cdSize = dv.getUint32(eocd + 12, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const entries = {};
+  let p = cdOffset;
+  while (p < cdOffset + cdSize) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('bad central dir sig');
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+    // Read local header to find data start.
+    if (dv.getUint32(localOff, true) !== 0x04034b50) throw new Error('bad local sig');
+    const lhNameLen = dv.getUint16(localOff + 26, true);
+    const lhExtraLen = dv.getUint16(localOff + 28, true);
+    const dataLen = dv.getUint32(localOff + 22, true);
+    const dataStart = localOff + 30 + lhNameLen + lhExtraLen;
+    entries[name] = u8.subarray(dataStart, dataStart + dataLen);
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+  return entries;
+};
+
+it('vsdx: produces a valid ZIP with all 7 OOXML parts', async () => {
+  const blob = exportVsdx(vsdxData());
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  const entries = readZip(u8);
+  for (const name of [
+    '[Content_Types].xml',
+    '_rels/.rels',
+    'visio/document.xml',
+    'visio/_rels/document.xml.rels',
+    'visio/pages/pages.xml',
+    'visio/pages/_rels/pages.xml.rels',
+    'visio/pages/page1.xml',
+  ]) {
+    assert.ok(entries[name], `missing part: ${name}`);
+  }
+});
+
+it('vsdx: page1 includes shapes for every top-level node and an edge per rule', async () => {
+  const blob = exportVsdx(vsdxData());
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  const page1 = new TextDecoder().decode(readZip(u8)['visio/pages/page1.xml']);
+  // 4 top-level nodes (sub-location skipped) + 1 connector
+  const shapeCount = (page1.match(/<Shape /g) || []).length;
+  assert.equal(shapeCount, 5, `expected 5 shapes (4 nodes + 1 connector), got ${shapeCount}`);
+  assert.ok(page1.includes('<Text>Stock</Text>'),     'Stock label present');
+  assert.ok(page1.includes('<Text>Customers</Text>'), 'Customers label present');
+  assert.ok(page1.includes("OneD' V='1'"),            'connector marked one-dimensional');
+});
+
+it('vsdx: skips sub-locations from the top-level page', async () => {
+  const blob = exportVsdx(vsdxData());
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  const page1 = new TextDecoder().decode(readZip(u8)['visio/pages/page1.xml']);
+  assert.ok(!page1.includes('<Text>Bin A</Text>'), 'Bin A (sub-location) should not appear on top-level page');
+});
+
+it('vsdx: empty data still produces a valid file (placeholder shape)', async () => {
+  const blob = exportVsdx({ nodes: [], routes: [], operationTypes: [], putawayRules: [] });
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  const entries = readZip(u8);
+  assert.ok(entries['visio/pages/page1.xml'], 'page1 present');
+  const page1 = new TextDecoder().decode(entries['visio/pages/page1.xml']);
+  assert.ok(page1.includes('(empty)'), 'placeholder shape rendered');
+});
+
+it('vsdx: XML-escapes label text', async () => {
+  const data = vsdxData();
+  data.nodes[0].label = 'Stock <A&B> "main"';
+  const blob = exportVsdx(data);
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  const page1 = new TextDecoder().decode(readZip(u8)['visio/pages/page1.xml']);
+  assert.ok(page1.includes('Stock &lt;A&amp;B&gt; &quot;main&quot;'), 'label escaped');
+  assert.ok(!page1.includes('<A&B>'), 'raw <A&B> must not leak');
+});
+
 await flush();
