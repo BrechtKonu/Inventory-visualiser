@@ -246,6 +246,7 @@ const fieldDefs = {
     ]},
     { key: "barcode", label: "Barcode", type: "text" },
     { key: "company_id", label: "Company", type: "m2o", source: "company" },
+    { key: "pinned", label: "Pin to main view", type: "boolean", hint: "Sub-locations only — force visibility on the top-level canvas (rule-connected sub-locs auto-show without this)." },
     { key: "__group_logistics", type: "group", label: "Logistics" },
     { key: "removal_strategy_id", label: "Removal Strategy", type: "select", options: [
       { value: "fifo", label: "FIFO" }, { value: "lifo", label: "LIFO" },
@@ -2313,10 +2314,13 @@ const HelpModal = ({ onClose }) => {
               <div><Kbd>↑↓←→</Kbd> — Nudge 8px (<Kbd>Shift</Kbd> = 1px)</div>
               <div><Kbd>[</Kbd> / <Kbd>]</Kbd> — Send back / bring forward</div>
               <div><Kbd>Ctrl+[</Kbd> / <Kbd>Ctrl+]</Kbd> — To back / to front</div>
-              <div><Kbd>Space</Kbd> + drag — Pan from background</div>
-              <div><Kbd>Alt</Kbd> + drag — Pan from anywhere (over nodes too)</div>
+              <div><Kbd>Ctrl</Kbd> + drag — Pan from anywhere (recommended)</div>
+              <div><Kbd>Alt</Kbd> + drag — Pan from anywhere</div>
               <div><Kbd>Middle-click</Kbd> + drag — Pan from anywhere</div>
-              <div><Kbd>Scroll</Kbd> — Zoom in/out at cursor</div>
+              <div><Kbd>Space</Kbd> + drag — Pan from background</div>
+              <div><Kbd>Scroll</Kbd> — Zoom at cursor</div>
+              <div><Kbd>Ctrl</Kbd>+scroll — Vertical pan</div>
+              <div><Kbd>Shift</Kbd>+scroll — Horizontal pan</div>
               <div><Kbd>Ctrl+S</Kbd> — Save (export JSON)</div>
               <div><Kbd>Ctrl+O</Kbd> — Open (import JSON)</div>
               <div><Kbd>Shift</Kbd> + click — Multi-select / lasso</div>
@@ -2974,6 +2978,37 @@ export default function App() {
     }
     return m;
   }, [data.nodes]);
+  // Sub-locations that are referenced as src/dst of any stock.rule.
+  // These auto-promote to the main canvas (rather than being walked-up to
+  // their top-level ancestor for rendering) — otherwise the sub-loc src/dst
+  // semantics would be invisible without drilling in. Pairs with the
+  // explicit `data.pinned` toggle (a boolean on a location node) which
+  // also forces main-canvas visibility regardless of rule references.
+  const ruleConnectedSubLocs = useMemo(() => {
+    const set = new Set();
+    for (const route of data.routes) {
+      for (const rule of route.rules) {
+        for (const lid of [rule.src_location_id, rule.dest_location_id]) {
+          if (!lid) continue;
+          const node = data.nodes.find(n => n.id === lid);
+          if (node?.type === 'location' && node.data?.location_id) set.add(lid);
+        }
+      }
+    }
+    return set;
+  }, [data.routes, data.nodes]);
+  // Set of sub-loc ids that should be visible on the main canvas.
+  // Combines: (a) parents the user expanded inline, (b) sub-locs used by
+  // any rule, (c) sub-locs the user explicitly pinned via context menu.
+  const visibleSubLocs = useMemo(() => {
+    const set = new Set(ruleConnectedSubLocs);
+    for (const n of data.nodes) {
+      if (n.type !== 'location' || !n.data?.location_id) continue;
+      if (expandedInline.has(n.data.location_id)) set.add(n.id);
+      if (n.data?.pinned) set.add(n.id);
+    }
+    return set;
+  }, [ruleConnectedSubLocs, data.nodes, expandedInline]);
 
   const isEdgeInViewport = useCallback((src, dst) => {
     if (!virtualiseRender) return true;
@@ -3585,10 +3620,24 @@ export default function App() {
         }
       },
       { id: "duplicate", icon: "⎘", label: "Duplicate", hotkey: "Ctrl+D", run: () => duplicateItem(type, id) },
-      ...(type === "location" ? [
-        { divider: true },
-        { id: "drill",  icon: "⌖", label: "Open sub-locations →", run: () => { setDrillIntoType('location'); setDrillInto(id); } },
-      ] : []),
+      ...(type === "location" ? (() => {
+        const node = data.nodes.find(n => n.id === id);
+        const isSubLoc = !!node?.data?.location_id;
+        const items = [
+          { divider: true },
+          { id: "drill",  icon: "⌖", label: "Open sub-locations →", run: () => { setDrillIntoType('location'); setDrillInto(id); } },
+        ];
+        if (isSubLoc) {
+          const isPinned = !!node.data?.pinned;
+          items.push({
+            id: "pin",
+            icon: isPinned ? "⊙" : "⊕",
+            label: isPinned ? "Unpin from main view" : "Pin to main view",
+            run: () => doUpdate('location', id, { data: { ...node.data, pinned: !isPinned } }),
+          });
+        }
+        return items;
+      })() : []),
       ...(type === "warehouse" ? [
         { divider: true },
         { id: "drill-wh", icon: "⌖", label: "Open warehouse scope →", run: () => { setDrillIntoType('warehouse'); setDrillInto(id); } },
@@ -4428,9 +4477,11 @@ export default function App() {
   }, []);
 
   const onCanvasDown = useCallback((e) => {
-    // Anywhere-pan: Alt+drag (or middle mouse button) starts a pan, even on top of a node.
-    // This lets the user move the canvas without having to find empty background space.
-    if (e.altKey || e.button === 1) {
+    // Anywhere-pan: Ctrl+drag, Alt+drag, or middle mouse button starts a pan,
+    // even on top of a node. Lets the user move the canvas without hunting
+    // for empty background. Ctrl is the primary binding (Alt clashes with
+    // some window-manager setups; middle-click isn't on every mouse).
+    if (e.ctrlKey || e.metaKey || e.altKey || e.button === 1) {
       e.preventDefault();
       setIsPan(true);
       setPanSt({ x: e.clientX - offset.x, y: e.clientY - offset.y });
@@ -4655,6 +4706,21 @@ export default function App() {
 
   const onWheel = useCallback((e) => {
     e.preventDefault();
+    // Ctrl+wheel = vertical pan, Shift+wheel = horizontal pan, plain wheel = zoom.
+    // Pan deltas are in screen pixels (deltaY directly), so the canvas moves
+    // with the same feel as a regular scroll. Holding both modifiers is
+    // treated as Ctrl (vertical pan wins) — rare combo, not worth a third path.
+    if (e.ctrlKey || e.metaKey) {
+      setOffset(o => ({ x: o.x, y: o.y - e.deltaY }));
+      return;
+    }
+    if (e.shiftKey) {
+      // Some mice report horizontal scroll on deltaX when shift is held;
+      // fall back to deltaY otherwise so a regular wheel still pans.
+      const dx = e.deltaX || e.deltaY;
+      setOffset(o => ({ x: o.x - dx, y: o.y }));
+      return;
+    }
     const d = e.deltaY > 0 ? 0.93 : 1.07;
     const ns = Math.min(Math.max(scale * d, 0.2), 3);
     const r = svgRef.current.getBoundingClientRect();
@@ -5550,9 +5616,12 @@ export default function App() {
                     if (!isPivotOrDesc(sn) || !isPivotOrDesc(dn)) return null;
                   }
                   // Sub-location remap (option A from roadmap #50): on the main
-                  // canvas (no drillInto), if src or dst is a sub-location, walk
-                  // up its location_id chain to the top-level ancestor and use
-                  // that as the visible endpoint instead. The drill-in render
+                  // canvas (no drillInto), if src or dst is a sub-location AND
+                  // it's NOT in the visibleSubLocs set, walk up its location_id
+                  // chain to the top-level ancestor and use that as the visible
+                  // endpoint instead. If the sub-loc IS visible (rule-connected,
+                  // pinned, or inside an inline-expanded parent), draw the edge
+                  // directly to it — no remap, no badge. The drill-in render
                   // (separate code path) doesn't need this — sub-locations ARE
                   // visible there.
                   let subSrc = null, subDst = null;
@@ -5565,8 +5634,8 @@ export default function App() {
                       }
                       return cur || n;
                     };
-                    if (sn.data?.location_id) { subSrc = sn; sn = walkToTop(sn); }
-                    if (dn.data?.location_id) { subDst = dn; dn = walkToTop(dn); }
+                    if (sn.data?.location_id && !visibleSubLocs.has(sn.id)) { subSrc = sn; sn = walkToTop(sn); }
+                    if (dn.data?.location_id && !visibleSubLocs.has(dn.id)) { subDst = dn; dn = walkToTop(dn); }
                   }
                   const { sp, dp, ss, ds } = bestPorts(sn, dn);
                   const p1 = { x: sp.x * scale + offset.x, y: sp.y * scale + offset.y };
@@ -5868,10 +5937,13 @@ export default function App() {
                   }
                 }
               } else {
-                // Main canvas: hide all sub-locations EXCEPT children of any
-                // parent the user has explicitly expanded inline.
+                // Main canvas: hide all sub-locations EXCEPT those that are
+                // (a) children of an inline-expanded parent, (b) referenced
+                // by a stock.rule as src/dst, or (c) explicitly pinned via
+                // the context menu (data.pinned === true). The combined set
+                // is precomputed in `visibleSubLocs`.
                 if (node.type === "location" && node.data?.location_id) {
-                  if (!expandedInline.has(node.data.location_id)) return null;
+                  if (!visibleSubLocs.has(node.id)) return null;
                 }
               }
               // Warehouses with children render as a blob+name-tag layer above; hide the small rect.
@@ -5892,8 +5964,11 @@ export default function App() {
                   onMouseEnter={() => setHoverId(node.id)}
                   onMouseLeave={() => setHoverId(h => h === node.id ? null : h)}
                   onMouseDown={e => {
-                  // Spacebar held = pan mode, treat node-click as bg pan
-                  if (spaceDown) {
+                  // Spacebar held OR Ctrl/Alt/middle-click = pan mode, even on top of a node.
+                  // Routed here in addition to onCanvasDown so the pan trigger
+                  // works on the foreground node layer too.
+                  if (spaceDown || e.ctrlKey || e.metaKey || e.altKey || e.button === 1) {
+                    e.preventDefault();
                     setIsPan(true); setPanSt({ x: e.clientX - offset.x, y: e.clientY - offset.y });
                     downPosRef.current = { x: e.clientX, y: e.clientY, kind: "bg" };
                     dragThresholdRef.current = false;

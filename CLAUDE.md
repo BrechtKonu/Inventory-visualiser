@@ -371,6 +371,37 @@ Auth: API key in `apiCfg` extended with an LLM provider section. Privacy: never 
 
 Effort estimate: a small slice (one of the 6 above) is ~1 day. Full integration is a multi-week thread. **Brainstorm before coding** — too many design choices to default sensibly.
 
+### Roadmap wave 5 (captured 2026-05-09 evening)
+
+#### ✅ Sub-locations connected by a rule auto-show on main canvas
+
+Sub-locations referenced as `src_location_id` or `dest_location_id` of any
+`stock.rule` are now automatically visible on the main canvas — no need to
+expand-inline or drill in. Memo: `ruleConnectedSubLocs`. The rule-edge
+remap (was always walking up to the top-level ancestor for visible-endpoint
+purposes) now skips the walk if the sub-loc is already visible, so the
+edge draws directly to the sub-loc and the `[sub-loc]` badge isn't shown.
+
+#### ✅ Per-sub-location pin toggle (`data.pinned`)
+
+Right-click any sub-location → **Pin to main view** / **Unpin from main
+view**. Pinned sub-locations show on the main canvas regardless of rule
+references. Field is exposed in the PropPanel too (`pinned` boolean).
+The combined visibility set is `visibleSubLocs` = (inline-expanded
+parents' children) ∪ (rule-connected) ∪ (pinned).
+
+#### ✅ Pan UX — Ctrl+drag and Ctrl/Shift+wheel
+
+- **Ctrl+drag (anywhere)** — primary pan binding, works over nodes too.
+  Joins the existing Alt+drag, middle-click, and Space+drag bindings.
+  Cmd+drag also works on Mac (`metaKey`).
+- **Ctrl+wheel** — vertical pan (deltaY in screen pixels).
+- **Shift+wheel** — horizontal pan. Uses `deltaX` if the mouse reports it,
+  falls back to `deltaY` otherwise so a regular wheel still pans.
+- Plain wheel still zooms at cursor — unchanged.
+
+Help modal text updated.
+
 ### Reference scale benchmark — DRBB (Dreambaby)
 
 The canonical "huge warehouse" customer used to size the visualiser. Real Odoo
@@ -479,11 +510,11 @@ where:
 | Sidebar (right) | Rule PropPanel | Putaway rule PropPanel |
 | Drill-in | Sub-locations | Sub-locations + which putaway rule resolves there |
 
-Three approaches for the toggle (pick when starting):
+**Decision (2026-05-09 evening): Option A — toolbar mode toggle.** Other approaches recorded for posterity but not on the roadmap.
 
 | # | Approach | Description |
 |---|---|---|
-| **A** (recommended) | **Mode toggle on the toolbar** — `[Routes/Rules] [Putaway]` segmented control. Same canvas, rebound. | Cheapest. One canvas, two interpretations of the same data. |
+| **A** ✅ | **Mode toggle on the toolbar** — `[Routes/Rules] [Putaway]` segmented control. Same canvas, rebound. | Cheapest. One canvas, two interpretations of the same data. |
 | B | **Split-screen / tabbed** — top half routes/rules, bottom half putaway, synchronised pan. | Comparison-friendly but tight on screen real estate. |
 | C | **Separate route under `/putaway` URL** — full-page dedicated view with its own state. | Cleanest mental model, most work — needs its own command palette, viewport state, etc. |
 
