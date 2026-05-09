@@ -382,6 +382,16 @@ remap (was always walking up to the top-level ancestor for visible-endpoint
 purposes) now skips the walk if the sub-loc is already visible, so the
 edge draws directly to the sub-loc and the `[sub-loc]` badge isn't shown.
 
+#### ✅ Sub-loc → parent visual connector
+
+Every visible sub-location (rule-connected, pinned, or under an
+inline-expanded parent) draws a faint dashed line from its anchor to
+its nearest visible ancestor's anchor. Pure decoration: makes the
+parent-child relationship legible without forcing drill-in. Stroke =
+`T.borderLight` at 0.35 opacity, dashed `3 4` at scale. Skipped in
+drill-in modes (those have their own layout cues — tree edges +
+breadcrumb).
+
 #### ✅ Per-sub-location pin toggle (`data.pinned`)
 
 Right-click any sub-location → **Pin to main view** / **Unpin from main
@@ -401,6 +411,25 @@ parents' children) ∪ (rule-connected) ∪ (pinned).
 - Plain wheel still zooms at cursor — unchanged.
 
 Help modal text updated.
+
+#### ✅ Sidebar show/hide toggles + auto-fit on narrow viewports
+
+For narrow / split-screen viewports where the toolbar got cut off and the right sidebar overlapped the canvas:
+
+- Two toggles at the very-left of the toolbar (so they stay visible if the toolbar overflows): hide/show left sidebar and hide/show right sidebar (PropPanel). Both persisted in localStorage.
+- Toolbar gets `overflowX: auto` so it can be horizontally scrolled when items don't fit, instead of clipping at the right edge.
+- Left sidebar uses `display: none` when hidden; canvas `marginLeft` tracks the toggle so the canvas reclaims the full width.
+- PropPanel render is gated on `rightSidebarVisible` so the user can dismiss it without losing selection. Width caps at `100vw` so it can't exceed the viewport on tiny screens.
+- Defensive overflow rules in the build template: `html, body, #root` get `overflow: hidden` + `width: 100%` so nothing spills outside the viewport. App root uses `width: 100vw; maxWidth: 100%; maxHeight: 100%` for the same belt-and-braces guarantee.
+- Auto-compact: `window.innerWidth < 1100` flips the toolbar to compact mode; `< 900` also auto-hides both sidebars on first load (session-scoped guard so user can reopen them and the auto-hide doesn't fire again).
+
+#### ✅ Sub-loc → parent visual connector (current commit)
+
+Every visible sub-location (rule-connected, pinned, or under an inline-expanded parent) draws a faint dashed line from its anchor to its nearest visible ancestor's anchor. Pure decoration: makes the parent-child relationship legible without forcing drill-in. Stroke = `T.borderLight` at 0.35 opacity, dashed `3 4` at scale. Skipped in drill-in modes.
+
+#### ❌ Putaway dedicated view — reverted
+
+A first cut at a separate putaway-centric canvas (`3d32e0b`) was reverted in `7e6d65a` — the result didn't match Brecht's intent for what "categories + putaway as primary entities" should feel like. The PutawayPanel inside sub-loc drill-in + putaway fields in PropPanel remain the only putaway surfaces. **Note**: that commit also fixed a real bug where `doUpdate('putaway_rule', …)` mistakenly mapped over `data.nodes`. The revert restored the bug; if a putaway-rule edit ever needs to flow through `doUpdate` (currently it doesn't — PutawayPanel uses its own writer), this needs revisiting. Worth noting for the next attempt at a dedicated putaway view.
 
 ### Reference scale benchmark — DRBB (Dreambaby)
 

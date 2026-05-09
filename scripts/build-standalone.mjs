@@ -54,7 +54,9 @@ const html = `<!doctype html>
 
       html, body, #root {
         height: 100%;
+        width: 100%;
         margin: 0;
+        overflow: hidden; /* App root manages its own scrolling */
       }
 
       body {

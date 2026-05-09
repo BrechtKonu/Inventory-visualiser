@@ -1098,7 +1098,7 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
   };
 
   return (
-    <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 330, background: T.surface, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 30, fontFamily: "'IBM Plex Sans', sans-serif" }}>
+    <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 330, maxWidth: "100vw", background: T.surface, borderLeft: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 30, fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 26, height: 26, borderRadius: 5, background: s.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{s.icon}</div>
@@ -2766,6 +2766,26 @@ export default function App() {
   });
   useEffect(() => { try { localStorage.setItem('leftSidebarVisible', leftSidebarVisible ? '1' : '0'); } catch (_) {} }, [leftSidebarVisible]);
   useEffect(() => { try { localStorage.setItem('rightSidebarVisible', rightSidebarVisible ? '1' : '0'); } catch (_) {} }, [rightSidebarVisible]);
+  // Auto-compact toolbar + auto-hide sidebars when the viewport is narrow.
+  // Tracks window width via a resize listener; on narrow screens the user can
+  // still toggle the sidebars back on, but the default behaviour is "fit the
+  // visible chrome inside the window so nothing spills out".
+  useEffect(() => {
+    const apply = () => {
+      const w = window.innerWidth || 1280;
+      if (w < 1100) setCompact(true);
+      // Only auto-hide on first encounter at narrow width; respect user
+      // toggles afterward by checking session-level guard.
+      if (w < 900 && !sessionStorage.getItem('autoHideApplied')) {
+        setLeftSidebarVisible(false);
+        setRightSidebarVisible(false);
+        try { sessionStorage.setItem('autoHideApplied', '1'); } catch (_) {}
+      }
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, []);
   syncTheme(isDark); // keep T & nodeStyles in sync before every render
   const [data, setData] = useState(initData);
   const [scale, setScale] = useState(0.72);
@@ -4777,7 +4797,7 @@ export default function App() {
   }, [sel, data.routes]);
 
   return (
-    <div style={{ width: "100%", height: "100vh", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ width: "100vw", maxWidth: "100%", height: "100vh", maxHeight: "100%", background: T.bg, fontFamily: "'IBM Plex Sans', sans-serif", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
       {/* TOOLBAR */}
@@ -5333,6 +5353,46 @@ export default function App() {
                 </g>
               );
             })}
+
+            {/* SUB-LOCATION → PARENT CONNECTORS — for every sub-location
+                that's currently visible on the main canvas (rule-connected,
+                pinned, or under an inline-expanded parent), draw a faint
+                dashed line from the sub-loc's anchor to its nearest visible
+                ancestor. Pure decoration: makes the parent-child relationship
+                legible without forcing drill-in. Skipped in drill-in modes
+                (those have their own layout cues — tree edges, breadcrumbs). */}
+            {!drillInto && (() => {
+              const lines = [];
+              for (const node of data.nodes) {
+                if (node.type !== 'location' || !node.data?.location_id) continue;
+                if (!visibleSubLocs.has(node.id)) continue;
+                // Walk up the parent chain to the first visible ancestor.
+                let parent = nodeById.get(node.data.location_id), depth = 0;
+                while (parent && depth < 50) {
+                  // Top-level location (no location_id) — always visible.
+                  if (!parent.data?.location_id) break;
+                  // Sub-location ancestor that is itself currently visible.
+                  if (visibleSubLocs.has(parent.id)) break;
+                  parent = nodeById.get(parent.data.location_id);
+                  depth++;
+                }
+                if (!parent || parent.id === node.id) continue;
+                const sx = (node.x + NW / 2) * scale + offset.x;
+                const sy = (node.y + NH / 2) * scale + offset.y;
+                const px = (parent.x + NW / 2) * scale + offset.x;
+                const py = (parent.y + NH / 2) * scale + offset.y;
+                lines.push(
+                  <line key={`sub-parent-${node.id}`}
+                        x1={px} y1={py} x2={sx} y2={sy}
+                        stroke={T.borderLight}
+                        strokeWidth={Math.max(0.8, scale * 0.9)}
+                        strokeOpacity={0.35}
+                        strokeDasharray={`${3 * scale} ${4 * scale}`}
+                        pointerEvents="none" />
+                );
+              }
+              return lines;
+            })()}
 
             {/* OP TYPE WASH — faded color rect per op-type, only in 'pills_wash' mode.
                 Replaces the older blob+leader-line UI; pill rendering happens after edges below. */}
