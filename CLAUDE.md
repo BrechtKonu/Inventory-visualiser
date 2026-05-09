@@ -356,6 +356,68 @@ Items from the user's morning pass:
   - `('product_id.last_purchase_date', ...)` — verify field exists; might be on partner not product.
   - `('product_id.quality_alert_count', ...)` — Enterprise-only; flag in description.
 
+### Roadmap wave 4 (captured 2026-05-09, post-storage-categories)
+
+#### 🟦 Sub-locations as `src/dst` of regular `stock.rule` records
+
+Today the storage-categories ship makes sub-locations real graph nodes (with `location_id` parent pointers) and adds a drill-in view. Putaway rules can target sub-locations via `location_out_id`. **Regular pull/push/manufacture rules cannot yet src/dst at the sub-location level on the main canvas** — they're top-level only. Visualization proposals (pick one when you tackle this):
+
+| # | Approach | Pros | Cons |
+|---|---|---|---|
+| **A** (recommended) | **Render rule between parents + small badge for sub-target** — `Stock →[Bin 1] Customers` on main canvas; drill-in shows the actual sub-edge. | Keeps main canvas readable. Top-level flow visible. Drill-in for detail. | Two layers of truth (canvas summary + drill-in detail). |
+| B | **Promote sub-location to a pinnable top-level node** — user marks "show on main canvas" per sub-location. Pinned ones render alongside top-level. | User control. Cluttery only if user opts in. | Adds a `pinned: boolean` field; UI for marking. |
+| C | **Two-step render** — main shows rule between parents; hover/click reveals a popover with sub-target detail. | Zero clutter by default. | Sub-location info only visible on interaction. |
+| D | **Property panel only** — no canvas visualization; the rule's PropPanel shows sub-target. Canvas always renders top-level. | Simplest. | Sub-location semantics invisible without selection. |
+| E | **Always render sub-locations on main canvas** — flatten the hierarchy onto one canvas. | One source of truth. | Big warehouses become unreadable. |
+
+Implementation outline for (A):
+1. Extend `fieldDefs.rule` `src_location_id` and `dest_location_id` to support sub-location selection (tree-grouped dropdown).
+2. In edge render: if `rule.src_location_id` is a sub-location, render the edge from its top-level ancestor instead. Compute via `ancestorPath()`.
+3. Add a small `[<sub-loc-label>]` badge near the rule's edge midpoint when src or dst is a sub-location.
+4. Drill-in view picks up the rule edge naturally (its real src/dst are sub-locations).
+
+Effort: ~half day. Builds directly on `src/location-tree.js` already shipped.
+
+#### 🟦 Per-product capacity rules within a storage category (Odoo's `capacity_ids` o2m)
+
+Odoo's `stock.storage.category.capacity_ids` is a o2m of `(product, qty)` (and similarly `(package_type, qty)`) pairs. The visualiser's `data.storageCategories[].capacity_qty` is a single number — applies uniformly. To honour Odoo's actual model:
+
+```js
+data.storageCategories[i].capacity_ids = [
+  { product: 'FURN_7800 Office Desk', qty: 5 },
+  { product: 'ELEC_001 Laptop', qty: 50 },
+  // …else fallback to the category's `capacity_qty`
+];
+```
+
+The putaway simulator (`src/putaway-simulator.js`) already takes `capacity_qty` from the location's `data.capacity_qty`. To consume per-product capacity:
+- When matching a rule, look up `category.capacity_ids` for the product's row; use its `qty` as the capacity for THAT product on that location. If no row, use `category.capacity_qty` default.
+- Surface the table inside the StorageCategoryModal as an expandable row (per-category sub-table).
+
+#### 🟦 Per-product capacity_ids fetch from Odoo
+
+Currently `fetchInventoryFromOdoo` reads `stock.storage.category` with name + allow_new_product + max_weight only — capacity_ids o2m fetch is deferred (TODO comment in code). Once the per-product capacity UI lands, extend the fetch:
+
+```python
+cats = sr('stock.storage.category', [], ['name', 'allow_new_product', 'max_weight', 'capacity_ids'])
+caps = sr('stock.storage.category.capacity', [('storage_category_id', 'in', [c.id for c in cats])],
+          ['storage_category_id', 'product_id', 'product_uom_id', 'quantity'])
+# Group caps by storage_category_id → assemble capacity_ids per category
+```
+
+Add to `data.storageCategories[i].capacity_ids` after the cats fetch. Best-effort; degrade silently if the model is absent.
+
+#### 🟦 Auto-migration: path-string putaway rules → real sub-location nodes
+
+The user explicitly opted out at brainstorming time ("keep both — strings and nodes coexist"). If the choice ever flips, the migration logic:
+
+1. Scan all putaway rules with non-empty `location_out` and empty `location_out_id`.
+2. Parse the path: split by `/`, walk from the rule's `location_in_id` up the implied tree, materializing missing segments as new `stock.location` nodes with proper `location_id` parents.
+3. Set the rule's `location_out_id` to the leaf node id; leave `location_out` for back-compat.
+4. One-shot, all-or-nothing, with undo restoration in a single history step.
+
+Surfacing: an "Migrate path strings to nodes" action in the Add menu / a one-time banner on import. Not automatic — user-triggered.
+
 #### Code audit (no changes — proposals only)
 
 A scan of the current state surfaces these maintenance items:
