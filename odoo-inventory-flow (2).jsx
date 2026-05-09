@@ -5,6 +5,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { presetGenerator, presetDiff } from "./src/warehouse-presets.js";
 import { exportMarkdown } from "./src/markdown-exporter.js";
+import { exportMiroJson } from "./src/miro-exporter.js";
 import { simulatePutaway } from "./src/putaway-simulator.js";
 
 // ─── THEMES ──────────────────────────────────────────────────────────────────
@@ -208,7 +209,7 @@ const fieldDefs = {
     { key: "active", label: "Active", type: "boolean" },
     { key: "sequence", label: "Sequence", type: "number" },
     { key: "partner_id", label: "Address", type: "ref", hint: "res.partner" },
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
     { key: "__group_steps", type: "group", label: "Routings" },
     { key: "reception_steps", label: "Reception Steps", type: "select", options: [
       { value: "one_step", label: "Receive directly (1 step)" },
@@ -243,7 +244,7 @@ const fieldDefs = {
       { value: "view", label: "View" },
     ]},
     { key: "barcode", label: "Barcode", type: "text" },
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
     { key: "__group_logistics", type: "group", label: "Logistics" },
     { key: "removal_strategy_id", label: "Removal Strategy", type: "select", options: [
       { value: "fifo", label: "FIFO" }, { value: "lifo", label: "LIFO" },
@@ -283,7 +284,7 @@ const fieldDefs = {
     ]},
     { key: "sequence_code", label: "Sequence Prefix", type: "text" },
     { key: "warehouse_id", label: "Warehouse", type: "m2o", source: "warehouse" },
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
     { key: "color", label: "Kanban Color", type: "number" },
     { key: "__group_locations", type: "group", label: "Default Locations" },
     { key: "default_location_return_id", label: "Return Location", type: "m2o", source: "location" },
@@ -321,7 +322,7 @@ const fieldDefs = {
     { key: "name", label: "Route Name", type: "text" },
     { key: "active", label: "Active", type: "boolean" },
     { key: "sequence", label: "Sequence", type: "number" },
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
     { key: "__group_applicability", type: "group", label: "Applicability" },
     { key: "product_selectable", label: "Applicable on Product", type: "boolean" },
     { key: "product_categ_selectable", label: "Applicable on Category", type: "boolean" },
@@ -343,7 +344,7 @@ const fieldDefs = {
     { key: "active", label: "Active", type: "boolean" },
     { key: "sequence", label: "Sequence", type: "number" },
     { key: "warehouse_id", label: "Warehouse", type: "m2o", source: "warehouse" },
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
     { key: "__group_action", type: "group", label: "Action" },
     { key: "action", label: "Action", type: "select", options: [
       { value: "pull", label: "Pull From" }, { value: "push", label: "Push To" },
@@ -393,7 +394,7 @@ const fieldDefs = {
       { value: "last_used", label: "Last used" },
       { value: "closest_location", label: "Closest" },
     ]},
-    { key: "company_id", label: "Company", type: "ref", hint: "res.company" },
+    { key: "company_id", label: "Company", type: "m2o", source: "company" },
   ],
 };
 
@@ -617,6 +618,9 @@ const initData = () => ({
     { id: "cat-pallet", name: "Pallet",       allow_new_product: "same_product",   max_weight: 500, capacity_qty: 1   },
     { id: "cat-bin",    name: "Bin",          allow_new_product: "mixed_products", max_weight: 50,  capacity_qty: 100 },
     { id: "cat-cold",   name: "Cold Storage", allow_new_product: "mixed_products", max_weight: 0,   capacity_qty: 200 },
+  ],
+  companies: [
+    { id: "comp-1", name: "Main Company" },
   ],
 });
 
@@ -1034,6 +1038,7 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
               : f.source === "operation_type" ? data.operationTypes
               : f.source === "route" ? data.routes
               : f.source === "storage_category" ? (data.storageCategories || [])
+              : f.source === "company" ? (data.companies || [])
               : [];
             // Self-reference safety: a location/warehouse/route can't be its own parent.
             opts = opts.filter(o => o.id !== id);
@@ -1932,6 +1937,19 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     })),
   }));
 
+  // 7b. Companies (always present — res.company is core)
+  let companies = [];
+  try {
+    onProgress("Fetching companies…");
+    const cos = await sr("res.company", [], ["name"]);
+    companies = cos.map(c => ({ id: `comp-${c.id}`, name: c.name }));
+  } catch (e) {
+    console.warn("res.company fetch skipped:", e?.message || e);
+  }
+  const companyMap = new Map(companies.length
+    ? companies.map(c => [parseInt(c.id.replace(/^comp-/, ''), 10), c.id])
+    : []);
+
   // 8. Storage categories (best-effort: model exists in stock module from Odoo 16+)
   let storageCategories = [];
   let catMap = new Map();
@@ -1989,6 +2007,7 @@ async function fetchInventoryFromOdoo(cfg, onProgress = () => {}) {
     nodes: [...warehouseNodes, ...locationNodes],
     operationTypes, routes: appRoutes, putawayRules,
     storageCategories,
+    companies,
     _quantsByLocation,
   };
   return { data, userContext: session.user_context || {} };
@@ -2524,6 +2543,16 @@ export default function App() {
   const [drillShowHeatmap, setDrillShowHeatmap] = useState(false);
   const [showCategoriesModal, setShowCategoriesModal] = useState(false);
   const [showTestPutaway, setShowTestPutaway] = useState(false);
+  // Multi-company filter: when non-null, render only entities whose company_id
+  // is in the set. null = "All companies" (show everything regardless of tag).
+  const [selectedCompanies, setSelectedCompanies] = useState(null);
+  // Helper: does an entity pass the company filter?
+  const passesCompanyFilter = useCallback((e) => {
+    if (!selectedCompanies) return true;
+    const cid = e?.data?.company_id || e?.company_id;
+    if (!cid) return true; // entities without a company_id show everywhere (legacy)
+    return selectedCompanies.has(cid);
+  }, [selectedCompanies]);
   const svgRef = useRef(null);
   const importRef = useRef(null);
   const historyRef = useRef([]);
@@ -2747,6 +2776,20 @@ export default function App() {
       </style></head><body>${xml}<script>setTimeout(()=>window.print(), 250);</script></body></html>`);
     w.document.close();
   }, [buildExportSvg]);
+
+  // Export the full setup as a Miro-import-ready JSON dump.
+  // User runs their own script to POST items[] / tags[] to Miro REST API.
+  const handleExportMiro = useCallback(() => {
+    const json = JSON.stringify(exportMiroJson(data, { title: 'Warehouse Setup', includeOpTypes: false }), null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `warehouse-setup-miro-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+  }, [data]);
 
   // Export the full setup as a Markdown handover document.
   const handleExportMarkdown = useCallback(() => {
@@ -4256,6 +4299,50 @@ export default function App() {
                 style={{ fontSize: 9, color: T.textDim, fontFamily: "'IBM Plex Mono', monospace" }}>
             {data.nodes.length}n · {data.operationTypes.length}op · {data.routes.length}r · {data.routes.reduce((a, r) => a + r.rules.length, 0)}rl
           </span>
+          {(data.companies || []).length > 1 && (() => {
+            const all = data.companies || [];
+            const sel = selectedCompanies;
+            const isAll = !sel || sel.size === 0;
+            const label = isAll ? `All (${all.length})` : sel.size === 1
+              ? all.find(c => c.id === [...sel][0])?.name || '–'
+              : `${sel.size} of ${all.length}`;
+            return (
+              <details style={{ position: "relative" }}>
+                <summary title="Filter visible entities by company"
+                  style={{ listStyle: "none", cursor: "pointer", fontSize: 10, color: T.textDim,
+                    background: T.surfaceHover, border: `1px solid ${T.border}`, borderRadius: 3,
+                    padding: "3px 8px", fontFamily: "'IBM Plex Mono', monospace", userSelect: "none" }}>
+                  ⌂ {label}
+                </summary>
+                <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 50,
+                  background: T.surface, border: `1px solid ${T.border}`, borderRadius: 5,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)", padding: 6, minWidth: 180 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px",
+                    fontSize: 11, color: T.text, cursor: "pointer", fontFamily: "inherit" }}>
+                    <input type="radio" checked={isAll} onChange={() => setSelectedCompanies(null)} />
+                    All companies
+                  </label>
+                  <div style={{ height: 1, background: T.border, margin: "4px 0" }} />
+                  {all.map(c => {
+                    const checked = sel?.has(c.id) || false;
+                    return (
+                      <label key={c.id}
+                        style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px",
+                          fontSize: 11, color: T.text, cursor: "pointer", fontFamily: "inherit" }}>
+                        <input type="checkbox" checked={checked}
+                          onChange={(e) => setSelectedCompanies(prev => {
+                            const next = new Set(prev || []);
+                            if (e.target.checked) next.add(c.id); else next.delete(c.id);
+                            return next.size === 0 ? null : next;
+                          })} />
+                        {c.name}
+                      </label>
+                    );
+                  })}
+                </div>
+              </details>
+            );
+          })()}
         </div>
         <div style={{ display: "flex", gap: compact ? 2 : 4 }}>
           <Btn small compact={compact} icon="download" onClick={handleFetchFromOdoo} disabled={!!fetchStatus?.loading} variant={fetchStatus?.error ? "danger" : "ghost"} title="Fetch live data from Odoo (replaces current diagram)">
@@ -4274,6 +4361,7 @@ export default function App() {
                 { id: "ex-png",  icon: "▦",   label: "Export PNG (2× retina)", hint: "Slides, email, screenshots", run: handleExportPng },
                 { id: "ex-pdf",  icon: "▤",   label: "Export PDF (browser print)", hint: "Opens print dialog",     run: handleExportPdf },
                 { id: "ex-md",   icon: "✎",   label: "Export Markdown",            hint: "Project handover document", run: handleExportMarkdown },
+                { id: "ex-miro", icon: "▽",   label: "Export Miro (JSON)",         hint: "Items + connectors + tags for Miro REST API", run: handleExportMiro },
               ]});
             }}>Export</Btn>
           <Btn small compact={compact} icon="download" onClick={() => importRef.current?.click()} variant="ghost" title="Import diagram from JSON">Import</Btn>
@@ -5037,6 +5125,7 @@ export default function App() {
             {[...data.nodes].sort((a, b) => (a.z || 0) - (b.z || 0)).map(node => {
               if (hideUnused && node.type === "location" && !usedLocationIds.has(node.id)) return null;
               if (isDeactivated(node) && !showInactive) return null;
+              if (!passesCompanyFilter(node)) return null;
               // Drill-in viewport filter: when drillInto is set, show only the
               // pivot node + its descendants. Sub-locations (n.data.location_id set)
               // are HIDDEN on the main canvas; they only render in drill-in.
@@ -5462,6 +5551,7 @@ export default function App() {
           { id: "data-png",     group: "Data", label: "Export as PNG", icon: "▦", run: handleExportPng },
           { id: "data-pdf",     group: "Data", label: "Export as PDF (print)", icon: "▤", run: handleExportPdf },
           { id: "data-md",      group: "Data", label: "Export as Markdown", icon: "✎", run: handleExportMarkdown },
+          { id: "data-miro",    group: "Data", label: "Export as Miro JSON", icon: "▽", run: handleExportMiro },
           { id: "data-import",  group: "Data", label: "Import JSON…",   icon: "⬆", run: () => importRef.current?.click() },
           { id: "data-fetch",   group: "Data", label: "Fetch from Odoo", icon: "⏬", hint: KONU_CFG ? `Connection: ${KONU_CFG.connectionName}` : "Uses configured credentials", run: handleFetchFromOdoo },
           { id: "data-push",    group: "Data", label: "Push to Odoo",    icon: "⏫", hint: fetchedSnapshot ? "Diff against last fetch" : "Fetch first to enable", run: handlePushToOdoo },
