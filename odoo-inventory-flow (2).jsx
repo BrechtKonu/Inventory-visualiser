@@ -2755,6 +2755,17 @@ const ConnectModal = ({ srcLabel, dstLabel, routes, onCreate, onCreateInNewRoute
 export default function App() {
   const [isDark, setIsDark] = useState(false); // light default — flip with the ☾ toggle
   const [compact, setCompact] = useState(false); // toolbar density toggle
+  // Sidebar visibility — persisted across reloads. Hidden sidebars give the
+  // canvas the full width, useful on narrow screens / split-screens where
+  // 230 (left) + 330 (right) = 560px is otherwise lost to chrome.
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState(() => {
+    try { return localStorage.getItem('leftSidebarVisible') !== '0'; } catch (_) { return true; }
+  });
+  const [rightSidebarVisible, setRightSidebarVisible] = useState(() => {
+    try { return localStorage.getItem('rightSidebarVisible') !== '0'; } catch (_) { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem('leftSidebarVisible', leftSidebarVisible ? '1' : '0'); } catch (_) {} }, [leftSidebarVisible]);
+  useEffect(() => { try { localStorage.setItem('rightSidebarVisible', rightSidebarVisible ? '1' : '0'); } catch (_) {} }, [rightSidebarVisible]);
   syncTheme(isDark); // keep T & nodeStyles in sync before every render
   const [data, setData] = useState(initData);
   const [scale, setScale] = useState(0.72);
@@ -4770,8 +4781,24 @@ export default function App() {
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
       {/* TOOLBAR */}
-      <div style={{ height: 44, background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "0 10px" : "0 14px", flexShrink: 0, zIndex: 40 }}>
+      <div style={{ height: 44, background: T.surface, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: compact ? "0 10px" : "0 14px", flexShrink: 0, zIndex: 40, overflowX: "auto", overflowY: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: compact ? 6 : 10 }}>
+          {/* Sidebar toggles — placed first so they stay visible even if the
+              toolbar overflows on narrow screens. Both persisted in localStorage. */}
+          <button onClick={() => setLeftSidebarVisible(v => !v)}
+            title={leftSidebarVisible ? "Hide left sidebar (Routes & Rules)" : "Show left sidebar"}
+            style={{ background: leftSidebarVisible ? "transparent" : T.accentSoft, border: `1px solid ${T.border}`,
+              color: leftSidebarVisible ? T.textDim : T.accent, fontSize: 10, padding: "2px 5px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer", lineHeight: 1 }}>
+            {leftSidebarVisible ? "◀│" : "│▶"}
+          </button>
+          <button onClick={() => setRightSidebarVisible(v => !v)}
+            title={rightSidebarVisible ? "Hide right sidebar (Property panel)" : "Show right sidebar"}
+            style={{ background: rightSidebarVisible ? "transparent" : T.accentSoft, border: `1px solid ${T.border}`,
+              color: rightSidebarVisible ? T.textDim : T.accent, fontSize: 10, padding: "2px 5px", borderRadius: 3,
+              fontFamily: "'IBM Plex Mono', monospace", cursor: "pointer", lineHeight: 1 }}>
+            {rightSidebarVisible ? "│▶" : "◀│"}
+          </button>
           <div style={{ width: 22, height: 22, borderRadius: 4, background: `linear-gradient(135deg, ${T.accent}, ${T.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>⌂</div>
           {!compact && <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>Odoo Inventory Flow</span>}
           <span title={compact ? `${data.nodes.length} nodes · ${data.operationTypes.length} ops · ${data.routes.length} routes · ${data.routes.reduce((a, r) => a + r.rules.length, 0)} rules` : undefined}
@@ -4974,7 +5001,7 @@ export default function App() {
 
       <div style={{ flex: 1, position: "relative", display: "flex" }}>
         {/* ROUTE SIDEBAR */}
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 230, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 230, background: `${T.surface}f0`, borderRight: `1px solid ${T.border}`, display: leftSidebarVisible ? "flex" : "none", flexDirection: "column", zIndex: 25, backdropFilter: "blur(8px)" }}>
           <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: T.text }}>Routes & Rules</span>
             <input
@@ -5079,8 +5106,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* SVG CANVAS */}
-        <div style={{ flex: 1, marginLeft: 230, position: "relative" }}>
+        {/* SVG CANVAS — marginLeft tracks left sidebar visibility so the
+            canvas reclaims the full width when the sidebar is hidden. */}
+        <div style={{ flex: 1, marginLeft: leftSidebarVisible ? 230 : 0, position: "relative" }}>
           {/* PERF OVERLAY — diagnostic mode toggle from toolbar. */}
           {showPerf && (
             <div style={{ position: "absolute", bottom: 8, left: 8, zIndex: 30,
@@ -6280,8 +6308,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* PROPERTY PANEL */}
-        {sel && !putawayLoc && <PropPanel sel={sel} data={data}
+        {/* PROPERTY PANEL — gated on the right-sidebar toggle so the user
+            can dismiss it without losing their selection. */}
+        {sel && !putawayLoc && rightSidebarVisible && <PropPanel sel={sel} data={data}
           onUpdate={(type, id, upd) => {
             // Plan B: intercept wizard-managed warehouse flag edits.
             const WIZARD_FLAGS = ['reception_steps','delivery_steps','manufacture_to_resupply','manufacture_steps','buy_to_resupply','resupply_wh_ids'];
