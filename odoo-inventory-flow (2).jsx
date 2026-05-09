@@ -5363,7 +5363,7 @@ export default function App() {
             <rect data-bg="true" width="100%" height="100%" fill="url(#dots)" />
 
             {/* WAREHOUSE BLOBS — large dashed boundary around each warehouse's locations */}
-            {data.nodes.filter(n => n.type === "warehouse").map(wh => {
+            {data.nodes.filter(n => n.type === "warehouse" && passesCompanyFilter(n)).map(wh => {
               const ch = warehouseChildren.get(wh.id);
               if (!ch || ch.locations.length === 0) return null;
               const PAD_WH = 80;
@@ -5539,13 +5539,16 @@ export default function App() {
             })()}
 
             {/* OP TYPE WASH — faded color rect per op-type, only in 'pills_wash' mode.
-                Replaces the older blob+leader-line UI; pill rendering happens after edges below. */}
+                Replaces the older blob+leader-line UI; pill rendering happens after edges below.
+                Hidden for op-types that fail the company filter or whose endpoints are filtered out. */}
             {opVizMode === 'pills_wash' && drillIntoType !== 'location' && (() => {
               const PAD = 30;
               return data.operationTypes.map(op => {
+                if (!passesCompanyFilter(op)) return null;
                 const sn = nodeById.get(op.src_location_id);
                 const dn = nodeById.get(op.dest_location_id);
                 if (!sn || !dn) return null;
+                if (!passesCompanyFilter(sn) && !passesCompanyFilter(dn)) return null;
                 const minX = Math.min(sn.x, dn.x) - PAD;
                 const minY = Math.min(sn.y, dn.y) - PAD;
                 const maxX = Math.max(sn.x + NW, dn.x + NW) + PAD;
@@ -6025,6 +6028,12 @@ export default function App() {
                   const sn = nodeById.get(rule.src_location_id);
                   const dn = nodeById.get(rule.dest_location_id);
                   if (!sn || !dn) continue;
+                  // Company filter: skip pills whose op-type or both endpoints
+                  // are filtered out. Mirrors the rule-edge filter — stub
+                  // edges don't carry pills.
+                  const op = opById.get(rule.picking_type_id);
+                  if (!passesCompanyFilter(op)) continue;
+                  if (!passesCompanyFilter(sn) && !passesCompanyFilter(dn)) continue;
                   // Drill-in gating: only render a pill if the rule's edge is
                   // actually drawn (matches the route-edges layer's gating).
                   if (drillInto && drillIntoType === 'warehouse') {
@@ -6363,9 +6372,23 @@ export default function App() {
                       {(() => { const parts = node.label.split("/"); const last = parts[parts.length - 1].trim(); return last.length > 24 ? last.slice(0, 24) + "…" : last; })()}
                     </text>
                   )}
-                  {node.data?.usage && !editingLabel?.id && (
-                    <text x={sx + (NW - 10) * scale} y={sy + NH * 0.72 * scale} fontSize={10 * Math.max(scale, 0.55)} fill={T.textDim} fontFamily="'IBM Plex Mono', monospace" dominantBaseline="central" textAnchor="end" pointerEvents="none" style={{ userSelect: "none" }}>{node.data.usage}</text>
-                  )}
+                  {node.data?.usage && !editingLabel?.id && (() => {
+                    // Single sub-label combining usage + barcode (when present),
+                    // separated by " · ". Truncated so it never overflows the
+                    // node's right edge.
+                    const bc = (node.data?.barcode || '').trim();
+                    const raw = bc ? `${node.data.usage} · ${bc}` : node.data.usage;
+                    const text = raw.length > 26 ? raw.slice(0, 25) + '…' : raw;
+                    return (
+                      <text x={sx + (NW - 10) * scale} y={sy + NH * 0.72 * scale}
+                            fontSize={10 * Math.max(scale, 0.55)} fill={T.textDim}
+                            fontFamily="'IBM Plex Mono', monospace"
+                            dominantBaseline="central" textAnchor="end"
+                            pointerEvents="none" style={{ userSelect: "none" }}>
+                        {text}
+                      </text>
+                    );
+                  })()}
                   {/* Connection ports — 4 sides + 4 corners. Invisible large hit-area + visible small dot, scale-up on hover */}
                   {["l", "r", "t", "b", "tl", "tr", "bl", "br"].map(side => {
                     const p = nodePort(node, side);
