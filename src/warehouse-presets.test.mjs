@@ -405,4 +405,119 @@ it('presetDiff: pure grow (1→3) → toAdd populated, toRemove empty', () => {
   assert.deepEqual(diff.toRemove.nodeIds, []);
 });
 
+// ── location-tree ─────────────────────────────────────────────
+
+import { childrenOf, descendantsOf, ancestorPath, isDescendantOf, hasCycle } from './location-tree.js';
+
+const sampleTree = () => [
+  { id: 'wh-stock', type: 'location', label: 'WH/Stock', data: { usage: 'internal' } },
+  { id: 'shelf-a',  type: 'location', label: 'Shelf A',  data: { usage: 'internal', location_id: 'wh-stock' } },
+  { id: 'bin-a1',   type: 'location', label: 'Bin 1',    data: { usage: 'internal', location_id: 'shelf-a' } },
+  { id: 'bin-a2',   type: 'location', label: 'Bin 2',    data: { usage: 'internal', location_id: 'shelf-a' } },
+  { id: 'shelf-b',  type: 'location', label: 'Shelf B',  data: { usage: 'internal', location_id: 'wh-stock' } },
+  { id: 'wh-input', type: 'location', label: 'WH/Input', data: { usage: 'internal' } },
+];
+
+it('childrenOf: top-level returns nodes with no location_id', () => {
+  const kids = childrenOf(sampleTree(), null);
+  assert.deepEqual(kids.map(n => n.id).sort(), ['wh-input', 'wh-stock']);
+});
+
+it('childrenOf: returns direct kids only', () => {
+  const kids = childrenOf(sampleTree(), 'wh-stock');
+  assert.deepEqual(kids.map(n => n.id).sort(), ['shelf-a', 'shelf-b']);
+});
+
+it('descendantsOf: returns transitive descendants', () => {
+  const desc = descendantsOf(sampleTree(), 'wh-stock');
+  assert.deepEqual(desc.map(n => n.id).sort(), ['bin-a1', 'bin-a2', 'shelf-a', 'shelf-b']);
+});
+
+it('descendantsOf: leaf returns empty', () => {
+  assert.deepEqual(descendantsOf(sampleTree(), 'bin-a1'), []);
+});
+
+it('ancestorPath: leaf to root inclusive', () => {
+  const path = ancestorPath(sampleTree(), 'bin-a1');
+  assert.deepEqual(path.map(n => n.id), ['wh-stock', 'shelf-a', 'bin-a1']);
+});
+
+it('isDescendantOf: bin under stock', () => {
+  assert.equal(isDescendantOf(sampleTree(), 'bin-a1', 'wh-stock'), true);
+  assert.equal(isDescendantOf(sampleTree(), 'wh-stock', 'bin-a1'), false);
+  assert.equal(isDescendantOf(sampleTree(), 'wh-stock', 'wh-stock'), false);
+});
+
+it('hasCycle: detects parent-loop', () => {
+  const cyclic = [
+    { id: 'a', type: 'location', label: 'A', data: { usage: 'internal', location_id: 'b' } },
+    { id: 'b', type: 'location', label: 'B', data: { usage: 'internal', location_id: 'a' } },
+  ];
+  assert.equal(hasCycle(cyclic, 'a'), true);
+  assert.equal(hasCycle(sampleTree(), 'bin-a1'), false);
+});
+
+// ── putaway simulator ─────────────────────────────────────────
+
+import { simulatePutaway } from './putaway-simulator.js';
+
+const simData = () => ({
+  nodes: [
+    { id: 'wh-stock', type: 'location', label: 'WH/Stock', data: { usage: 'internal', complete_name: 'WH/Stock' } },
+    { id: 'shelf-a',  type: 'location', label: 'Shelf A',  data: { usage: 'internal', location_id: 'wh-stock', barcode: 'A', capacity_qty: 50 } },
+    { id: 'shelf-b',  type: 'location', label: 'Shelf B',  data: { usage: 'internal', location_id: 'wh-stock', barcode: 'B', capacity_qty: 50 } },
+  ],
+  putawayRules: [
+    { id: 'pa-1', location_in_id: 'wh-stock', location_out_id: 'shelf-a', product: 'Office Desk', category: '', sequence: 1, storage_strategy: 'manual_no_strategy' },
+    { id: 'pa-2', location_in_id: 'wh-stock', location_out_id: 'shelf-b', product: '', category: 'Electronics', sequence: 2, storage_strategy: 'manual_no_strategy' },
+    { id: 'pa-3', location_in_id: 'wh-stock', location_out_id: 'wh-stock', product: '', category: 'All', sequence: 99, storage_strategy: 'closest_location' },
+  ],
+});
+
+it('simulatePutaway: matches by product first', () => {
+  const r = simulatePutaway(simData(), { product: 'Office Desk', category: '', location_in_id: 'wh-stock', qty: 5 });
+  assert.equal(r.matched.id, 'pa-1');
+  assert.equal(r.resolvedLocationId, 'shelf-a');
+});
+
+it('simulatePutaway: matches by category when no product', () => {
+  const r = simulatePutaway(simData(), { product: '', category: 'Electronics', location_in_id: 'wh-stock', qty: 1 });
+  assert.equal(r.matched.id, 'pa-2');
+  assert.equal(r.resolvedLocationId, 'shelf-b');
+});
+
+it('simulatePutaway: wildcard catches all when nothing else matches', () => {
+  const r = simulatePutaway(simData(), { product: 'Random', category: 'Random', location_in_id: 'wh-stock', qty: 1 });
+  assert.equal(r.matched.id, 'pa-3');
+  // closest_location strategy on wh-stock's children → Shelf A (alphabetic by barcode)
+  assert.equal(r.resolvedLocationId, 'shelf-a');
+});
+
+it('simulatePutaway: capacity check ok when quants present', () => {
+  const data = simData();
+  data._quantsByLocation = { 'shelf-a': 10 };
+  const r = simulatePutaway(data, { product: 'Office Desk', category: '', location_in_id: 'wh-stock', qty: 5 });
+  assert.equal(r.capacityCheck, 'ok');
+  assert.equal(r.currentQty, 10);
+  assert.equal(r.capacityQty, 50);
+});
+
+it('simulatePutaway: capacity over when exceeded', () => {
+  const data = simData();
+  data._quantsByLocation = { 'shelf-a': 48 };
+  const r = simulatePutaway(data, { product: 'Office Desk', category: '', location_in_id: 'wh-stock', qty: 5 });
+  assert.equal(r.capacityCheck, 'over');
+});
+
+it('simulatePutaway: capacity unknown without quants', () => {
+  const r = simulatePutaway(simData(), { product: 'Office Desk', category: '', location_in_id: 'wh-stock', qty: 5 });
+  assert.equal(r.capacityCheck, 'unknown');
+});
+
+it('simulatePutaway: no rules → null match', () => {
+  const r = simulatePutaway(simData(), { product: 'X', category: 'Y', location_in_id: 'unknown-loc', qty: 1 });
+  assert.equal(r.matched, null);
+  assert.equal(r.resolvedLocationId, null);
+});
+
 await flush();
