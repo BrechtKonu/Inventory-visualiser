@@ -1097,12 +1097,44 @@ const PropPanel = ({ sel, data, onUpdate, onClose, onDelete, onSaveToOdoo, hasOd
               }
               return o.label;
             };
-            input = (
-              <select value={val ?? ""} onChange={e => setVal(e.target.value)} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
-                <option value="">—</option>
-                {opts.map(o => <option key={o.id} value={o.id}>{labelOf(o)}</option>)}
-              </select>
-            );
+            // For huge warehouses (500+ locations) the raw <select> with
+            // hundreds of <option>s is unusable. When the option count exceeds
+            // 30 we render a typeahead instead (datalist-backed input):
+            // user types a fragment, browser narrows matches, value resolves
+            // by exact-id match. Falls back to <select> for small lists.
+            if (opts.length > 30) {
+              const listId = `m2o-${type}-${f.key}`;
+              const currentLabel = (() => {
+                const cur = opts.find(o => o.id === val);
+                return cur ? labelOf(cur) : '';
+              })();
+              input = (
+                <>
+                  <input type="text" defaultValue={currentLabel} placeholder={`type to filter ${opts.length} options…`}
+                    list={listId}
+                    onBlur={(e) => {
+                      const txt = e.target.value;
+                      if (!txt) { setVal(""); return; }
+                      // Match by exact label first, then by id, then by case-insensitive prefix.
+                      let match = opts.find(o => labelOf(o) === txt);
+                      if (!match) match = opts.find(o => o.id === txt);
+                      if (!match) match = opts.find(o => (labelOf(o) || '').toLowerCase().startsWith(txt.toLowerCase()));
+                      if (match) setVal(match.id);
+                    }}
+                    style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }} />
+                  <datalist id={listId}>
+                    {opts.map(o => <option key={o.id} value={labelOf(o)} />)}
+                  </datalist>
+                </>
+              );
+            } else {
+              input = (
+                <select value={val ?? ""} onChange={e => setVal(e.target.value)} style={{ width: "100%", padding: "6px 10px", background: T.surfaceRaised, border: `1px solid ${T.border}`, borderRadius: 5, color: T.text, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", outline: "none", boxSizing: "border-box" }}>
+                  <option value="">—</option>
+                  {opts.map(o => <option key={o.id} value={o.id}>{labelOf(o)}</option>)}
+                </select>
+              );
+            }
           } else if (f.type === "m2m") {
             const arr = Array.isArray(val) ? val : (typeof val === "string" && val ? val.split(",").map(x => x.trim()).filter(Boolean) : []);
             const localOpts = f.source === "warehouse" ? data.nodes.filter(n => n.type === "warehouse")
@@ -2690,6 +2722,14 @@ export default function App() {
   }, [data.nodes, data.operationTypes]);
 
   // Used location IDs (referenced in any rule src/dest or putaway rule)
+  // O(1) lookup map for nodes — replaces hot-path `data.nodes.find(...)` calls.
+  // For 500-location warehouses this avoids ~100k string comparisons/render.
+  const nodeById = useMemo(() => {
+    const m = new Map();
+    for (const n of data.nodes) m.set(n.id, n);
+    return m;
+  }, [data.nodes]);
+
   const usedLocationIds = useMemo(() => {
     const s = new Set();
     for (const route of data.routes) for (const rule of route.rules) {
@@ -5052,8 +5092,8 @@ export default function App() {
                 if (routeInactive && !showInactive) return null;
                 const rc = ROUTE_COLORS[route.colorIdx % ROUTE_COLORS.length];
                 return route.rules.map(rule => {
-                  let sn = data.nodes.find(n => n.id === rule.src_location_id);
-                  let dn = data.nodes.find(n => n.id === rule.dest_location_id);
+                  let sn = nodeById.get(rule.src_location_id);
+                  let dn = nodeById.get(rule.dest_location_id);
                   if (!sn || !dn) return null;
                   // Sub-location remap (option A from roadmap #50): on the main
                   // canvas (no drillInto), if src or dst is a sub-location, walk
@@ -5066,7 +5106,7 @@ export default function App() {
                     const walkToTop = (n) => {
                       let cur = n, depth = 0;
                       while (cur?.data?.location_id && depth < 50) {
-                        cur = data.nodes.find(nn => nn.id === cur.data.location_id);
+                        cur = nodeById.get(cur.data.location_id);
                         depth++;
                       }
                       return cur || n;

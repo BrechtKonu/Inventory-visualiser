@@ -428,19 +428,30 @@ Auth: API key in `apiCfg` extended with an LLM provider section. Privacy: never 
 
 Effort estimate: a small slice (one of the 6 above) is ~1 day. Full integration is a multi-week thread. **Brainstorm before coding** — too many design choices to default sensibly.
 
-#### 🟦 UI/UX for huge warehouses
+#### 🟨 UI/UX for huge warehouses (partial — quick wins shipped)
 
-Current rendering and interactions assume <50 locations / <30 routes. Real customer warehouses can have 500+ locations and 100+ routes. Needs an audit + concrete improvements:
+Built incrementally as features land. Quick wins shipped in commit `30302de`:
 
-- **Virtualised rendering** — only render nodes/edges within the current viewport. Today every node is in the SVG even if off-screen. SVG can handle ~1k nodes but performance dies above that.
-- **Cluster mode** — nodes within a small distance group into a single cluster bubble; zoom-in expands. Pattern from Cytoscape.js / Sigma.js.
-- **Search-driven navigation** — `/` opens command palette; should let user type a location/rule name to jump-zoom-and-select. Already half-there via the existing palette.
-- **Filter mode** — sidebar gains "Show only routes touching X" filter; canvas dims everything else.
-- **Multi-canvas tabs** — for warehouses with disjoint flow zones, allow saving named viewports ("inbound zone", "outbound zone", "manufacturing") and switching between them.
-- **Performance instrumentation** — measure first-paint, drag-jank, autolayout time as a function of node count. Set a budget (e.g. <100ms/frame at 500 nodes).
-- **Sub-location collapse** — even with the drill-in view, the main canvas could let parents collapse sub-tree summaries when the user wants a "everything at one zoom" view.
+**Shipped:**
+- ✅ Sub-locations hidden from main canvas by default; only render in drill-in. 500-bin warehouses don't bloat the main view.
+- ✅ `nodeById` Map memo replaces hot-path `data.nodes.find(...)` calls in edge render. At 500 nodes, saves ~100k string comparisons per render.
+- ✅ Typeahead m2o dropdowns when option count > 30. Datalist-backed input lets the browser narrow matches as you type. Falls back to native `<select>` for small lists.
+- ✅ Multi-company filter (only renders when >1 company) dims everything outside the selected set.
 
-Pick 2-3 highest-value items after a measurement pass on a real customer canvas. Effort: ~3-5 days for a meaningful chunk.
+**Still pending (in priority order for the next pass):**
+
+- **Virtualised SVG rendering** — only emit nodes/edges within the current viewport. Today every node is in the DOM even if off-screen. SVG handles ~1k nodes; perf dies above. Most impactful at 500+. ~1-2 days.
+- **Cluster mode** — nodes within a small distance group into a single cluster bubble; zoom-in expands. Pattern from Cytoscape.js / Sigma.js. Most useful at 1k+. ~1-2 days.
+- **Search-driven navigation** — `/` already opens command palette. Extend with "jump to location/rule" mode that pans-and-selects. Already half-there. ~half day.
+- **Filter mode** — sidebar gains "Show only routes touching X" filter; canvas dims everything else. ~half day.
+- **Multi-canvas tabs / named viewports** — save and restore named camera + filter states for "inbound zone", "outbound zone", "manufacturing" etc. ~1 day.
+- **Performance instrumentation** — measure first-paint, drag-jank, autolayout time vs node count. Set a budget (e.g. <100ms/frame at 500 nodes). Add a perf overlay toggle. ~half day.
+- **Sub-location collapse on main canvas** — let parents show "+12 children" when many sub-locations exist; click to drill in. ~half day.
+- **Sidebar route grouping** — at 100+ routes the sidebar list becomes a wall. Group by `colorIdx` or by a manual `category` field with collapsible headers. ~half day.
+- **Auto-layout perf cap** — Sugiyama is O(N² · iterations). At 500+ nodes the 12 barycenter passes take seconds. Cap iterations adaptively; offer a "fast layout" toggle that skips barycenter for >200 nodes. ~half day.
+- **JSON export size budget** — measure for 1k-node export. Likely fine but worth pinning a number. Add streaming download if it grows >5MB.
+
+Total remaining estimate: **~5-6 days** for the full pending list. Recommend doing virtualised rendering and cluster mode together as one commit (~2 days) — they're the load-bearing improvements. Other items are incremental.
 
 #### 🟦 Auto-migration: path-string putaway rules → real sub-location nodes
 
