@@ -9,14 +9,27 @@ A single-file React visual designer for Odoo inventory workflows. The main compo
 ## Commands
 
 ```bash
-npm install      # First-time setup
-npm run build    # Bundle to dist/odoo-inventory-flow.html via esbuild
-npm run proxy    # Start proxy server at http://localhost:4173 (required for live Odoo connection)
+npm install         # First-time setup
+npm run build       # Bundle to dist/odoo-inventory-flow.html via esbuild
+npm run proxy       # Start proxy server, auto-opens browser at http://localhost:4173
+npm run build:bundle  # Embed HTML into a single .mjs (dist/inventory-flow.bundle.mjs)
+npm run start       # Run the bundled file (one-step: build:bundle, then node bundle.mjs)
+npm run build:exe   # Produce a host-platform single-file binary via Node 20+ SEA
 ```
 
 The build produces a **single self-contained HTML file** with inlined, minified JS (IIFE format, ES2020 target) — no separate assets. The build script (`scripts/build-standalone.mjs`) uses esbuild's `write: false` mode and manually wraps the output in an HTML shell.
 
 **Dev loop:** there is no watch mode or dev server. Every code change requires `npm run build` before reloading the browser. To develop, either open `dist/odoo-inventory-flow.html` directly (offline/manual mode only) or run `npm run proxy` and open `http://localhost:4173`.
+
+## Deployment paths
+
+Three distribution options coexist:
+
+1. **In-Odoo (`addons/konu_tools`)** — preferred for Konu consultants. Same-origin RPC, no proxy, no installer. See module README. *PWA shell on the roadmap.*
+2. **Standalone executable** — for non-technical end users. `npm run build:exe` produces a host-platform binary (`dist/inventory-flow.exe` on Windows, `dist/inventory-flow-mac`, `dist/inventory-flow-linux`) via Node 20+ SEA — double-click to launch, browser auto-opens. Cross-platform CI matrix is on the roadmap.
+3. **Local dev / one-liner** — `npm run proxy` starts the proxy with auto-open. `npm run start` runs the embedded bundle (works without `dist/` on disk).
+
+The bundle (`dist/inventory-flow.bundle.mjs`) is the input for the SEA executable build but is also usable on its own — `node dist/inventory-flow.bundle.mjs` boots a fully working app on any machine with Node 18+ installed.
 
 There are no tests and no linter configured.
 
@@ -149,6 +162,8 @@ Remaining roadmap (deferred):
 - **MCP integration (KOTASK-065 Phase 2)** — point the `odoo-customer` MCP server at `konu.customer.connection` records (filter `mcp_exposed=True`).
 - **Customer-side fallback module (Option A)** — for security-conscious customers who refuse to share API keys. Same React bundle, mounted in a customer-side client_action with same-origin auth.
 - **API key rotation reminders** — `mail.activity` cron creating "rotate API key" follow-ups on connections with keys older than 6 months.
+- **PWA shell for Konu Tools** (Option E + offline + installable) — wrap the visualiser as a Progressive Web App so consultants can install it from their browser's address bar (`Install` button) and it appears as a native-feeling app on Windows/Mac/Linux/Android/iOS. Same React bundle, plus a service worker that caches the shell + the `konu.customer.connection` list, and a Web App Manifest with the Konu icon. Same architecture pattern is reusable for every future Konu Tool (timesheet quick-entry, helpdesk triage, sprint dashboard), so the PWA scaffolding becomes the shared base. Two phases: (a) manifest + service-worker cache (read-only, works for the visualiser inside `konu_tools`); (b) Background Sync API for pending RPCs so consultants can edit offline and the changes flush when connectivity returns.
+- **CI matrix for standalone executables** — current `npm run build:exe` builds the host platform only. Add a GitHub Actions workflow that runs the build on `ubuntu-latest`, `windows-latest`, `macos-latest` and uploads three artifacts (`inventory-flow-linux`, `inventory-flow.exe`, `inventory-flow-mac`) to a GitHub Release on tag push.
 
 ### Overnight 2026-05-08 → 2026-05-09 wave (status as of morning)
 

@@ -1,0 +1,7 @@
+{
+  "main": "dist/inventory-flow.bundle.mjs",
+  "output": "dist/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "useSnapshot": false,
+  "useCodeCache": true
+}

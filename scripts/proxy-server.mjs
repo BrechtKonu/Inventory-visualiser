@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { exec } from "node:child_process";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(scriptDir, "..");
@@ -13,6 +14,18 @@ const distHtmlPath = path.join(rootDir, "dist", "odoo-inventory-flow.html");
 const host = process.env.HOST || "127.0.0.1";
 const port = Number(process.env.PORT || 4173);
 const sessions = new Map();
+// Build pipeline may inline the bundled HTML here so the proxy can be shipped
+// as a single self-contained script / executable. Falls back to reading from
+// dist/ when this is empty (i.e. dev mode).
+const EMBEDDED_HTML = "";
+
+// Cross-platform browser launcher — no npm dependency.
+function openBrowser(url) {
+  const cmd = process.platform === "win32" ? `start "" "${url}"`
+            : process.platform === "darwin" ? `open "${url}"`
+            : `xdg-open "${url}"`;
+  exec(cmd, (err) => { if (err) console.log(`[proxy] could not auto-open browser: ${err.message}`); });
+}
 
 function formatOdooError(errorPayload, fallback = "Unknown Odoo error.") {
   if (!errorPayload) return fallback;
@@ -187,7 +200,7 @@ async function handleProxy(req, res) {
 }
 
 async function handleHtml(req, res) {
-  const html = await readFile(distHtmlPath, "utf8");
+  const html = EMBEDDED_HTML || await readFile(distHtmlPath, "utf8");
   res.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
@@ -225,5 +238,10 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`Odoo proxy server running at http://${host}:${port}`);
+  const url = `http://${host}:${port}`;
+  console.log(`Odoo proxy server running at ${url}`);
+  // Auto-open the browser unless --no-open is passed or NO_BROWSER=1
+  if (!process.argv.includes("--no-open") && !process.env.NO_BROWSER) {
+    openBrowser(url);
+  }
 });

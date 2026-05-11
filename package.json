@@ -8,7 +8,10 @@
   "scripts": {
     "build": "node scripts/build-standalone.mjs",
     "build:module": "node scripts/build-standalone.mjs",
+    "build:bundle": "node scripts/build-standalone.mjs && node scripts/build-bundle.mjs",
+    "build:exe": "npm run build:bundle && node scripts/build-exe.mjs",
     "proxy": "node scripts/proxy-server.mjs",
+    "start": "node dist/inventory-flow.bundle.mjs",
     "test:presets": "node src/warehouse-presets.test.mjs"
   },
   "dependencies": {
