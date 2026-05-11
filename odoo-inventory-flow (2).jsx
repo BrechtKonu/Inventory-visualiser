@@ -4229,6 +4229,77 @@ export default function App() {
         }
       }
 
+      // ── Sub-location clustering ──────────────────────────────────────────
+      // Locations with data.location_id pointing at another visible location
+      // are sub-locations of that parent. Place them in a compact grid below
+      // the parent so the cluster reads as a single unit (mirrors how Odoo's
+      // tree view nests stock.location records).
+      const parentOf = new Map();
+      for (const n of flowNodes) {
+        const pid = n.data?.location_id;
+        if (pid && nodeIds.has(pid) && pid !== n.id) parentOf.set(n.id, pid);
+      }
+      const childrenOfParent = new Map();
+      for (const [child, par] of parentOf) {
+        if (!childrenOfParent.has(par)) childrenOfParent.set(par, []);
+        childrenOfParent.get(par).push(child);
+      }
+      for (const [parentId, kids] of childrenOfParent) {
+        const parent = pos[parentId];
+        if (!parent) continue;
+        // Sort children by current y so barycenter ordering is preserved
+        kids.sort((a, b) => (pos[a]?.y ?? 0) - (pos[b]?.y ?? 0));
+        const COLS = Math.min(kids.length, 3);
+        const CW = NW + 20, CH = NH + 20;
+        const totalW = COLS * CW - 20;
+        const startX = parent.x + NW / 2 - totalW / 2;
+        const startY = parent.y + NH + 50;
+        kids.forEach((kid, i) => {
+          const col = i % COLS, row = Math.floor(i / COLS);
+          pos[kid] = { x: startX + col * CW, y: startY + row * CH };
+        });
+      }
+
+      // ── Transit centroid positioning ─────────────────────────────────────
+      // Transit locations bridge two (or more) warehouses. They look best
+      // placed at the centroid of their connected nodes — half-way between
+      // the warehouses they bridge — rather than dropping into a tier grid.
+      const transitList = flowNodes.filter(n => usage(n.id) === "transit");
+      for (const t of transitList) {
+        const conn = new Set();
+        for (const next of adjFFull[t.id] || []) if (next !== t.id) conn.add(next);
+        for (const [s, d] of edges) if (d === t.id && s !== t.id) conn.add(s);
+        if (conn.size < 2) continue;
+        const xs = [], ys = [];
+        for (const c of conn) {
+          const p = pos[c];
+          if (p) { xs.push(p.x); ys.push(p.y); }
+        }
+        if (xs.length >= 2) {
+          pos[t.id] = { x: avg(xs), y: avg(ys) };
+        }
+      }
+
+      // ── Final overlap pass v2 ────────────────────────────────────────────
+      // After children + transits move around, re-resolve overlaps.
+      const byX2 = new Map();
+      for (const id of nodeIds) {
+        const p = pos[id];
+        if (!p) continue;
+        const key = Math.round(p.x / 10) * 10;
+        if (!byX2.has(key)) byX2.set(key, []);
+        byX2.get(key).push({ id, ...p });
+      }
+      for (const arr of byX2.values()) {
+        arr.sort((a, b) => a.y - b.y);
+        for (let k = 1; k < arr.length; k++) {
+          if (arr[k].y < arr[k - 1].y + minGap) {
+            arr[k].y = arr[k - 1].y + minGap;
+            pos[arr[k].id].y = arr[k].y;
+          }
+        }
+      }
+
       // ── Warehouses: nudged onto a tag-friendly position ──────────────────
       // Each warehouse anchors above-left of its child cluster (so its name-tag
       // doesn't collide with op-type labels that auto-place on top).
